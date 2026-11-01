@@ -21,8 +21,12 @@ if [ -n "$MIN_SDK" ] && [ -n "$TV_SDK" ] && [ "$TV_SDK" -lt "$MIN_SDK" ]; then
   echo "half would need your own build with a lower minSdk (docs/TROUBLESHOOTING.md)." >&2
   exit 1
 fi
+# PREBUILT_APK=/absolute/path.apk installs an already signed release without rebuilding or changing
+# its signature. The default behaviour below remains the upstream Gradle build.
+if [ -n "${PREBUILT_APK:-}" ]; then
+  [ -s "$PREBUILT_APK" ] || { echo "ERROR: PREBUILT_APK is missing or empty" >&2; exit 1; }
 # SKIP_BUILD=1 installs the APK already built (tools/docker-build.sh builds it in Docker, with no JDK here).
-if [ "${SKIP_BUILD:-}" != 1 ]; then
+elif [ "${SKIP_BUILD:-}" != 1 ]; then
 # macOS: java_home or Homebrew; Linux: the java on PATH.
 # `/usr/libexec/java_home -v 17` means "17 or newer", so on a Mac whose only JDK is newer it prints
 # that one and exits 0, and the Homebrew fallback below never runs. Gradle 8.9 then stops with
@@ -108,7 +112,7 @@ echo "Stock launcher: $STOCK_LAUNCHER"
 HOME_QUERY='cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME'
 if [ "$STOCK_LAUNCHER" = none ]; then DISABLE_STOCK="echo stock launcher left alone"
 else DISABLE_STOCK="pm disable-user --user 0 $STOCK_LAUNCHER"; fi
-APK=app/build/outputs/apk/release/app-release.apk
+APK="${PREBUILT_APK:-app/build/outputs/apk/release/app-release.apk}"
 "$PY" -I ../tools/b64push.py "$APK" /data/local/tmp/tvhome.apk
 # Install on its own: in the batch below a failed install (e.g. "not enough space" on a full /data)
 # would not stop the stock launcher from being disabled.

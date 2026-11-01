@@ -2,6 +2,14 @@ plugins {
     id 'com.android.application'
 }
 
+def signedRelease = providers.gradleProperty('releaseKeystore').orNull
+def releaseSecrets = new Properties()
+if (signedRelease != null) {
+    // A GitHub Actions runner writes the four repository secrets to an ephemeral properties file.
+    // Local builds keep the upstream debug key so the existing rollback/testing flow still works.
+    file(signedRelease).withInputStream { releaseSecrets.load(it) }
+}
+
 android {
     namespace 'com.gathin.tvhome'
     compileSdk 34
@@ -21,8 +29,19 @@ android {
         applicationId providers.gradleProperty('launcherApplicationId').getOrElse('com.gathin.tvhome')
         minSdk 26
         targetSdk 34
-        versionCode 12
-        versionName '3.3'
+        versionCode providers.gradleProperty('releaseVersionCode').map { it.toInteger() }.getOrElse(12)
+        versionName providers.gradleProperty('releaseVersionName').getOrElse('3.3')
+    }
+
+    signingConfigs {
+        if (signedRelease != null) {
+            signedTvRelease {
+                storeFile file(releaseSecrets.getProperty('storeFile'))
+                storePassword releaseSecrets.getProperty('storePassword')
+                keyAlias releaseSecrets.getProperty('keyAlias')
+                keyPassword releaseSecrets.getProperty('keyPassword')
+            }
+        }
     }
 
     buildTypes {
@@ -32,7 +51,7 @@ android {
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             // Sideloaded over ADB, never published: sign with the debug key so it installs over a debug build.
-            signingConfig signingConfigs.debug
+            signingConfig signedRelease == null ? signingConfigs.debug : signingConfigs.signedTvRelease
         }
     }
 

@@ -11,6 +11,7 @@
 param(
     [string]$TvHost = $env:TV_HOST,
     [string]$StockLauncher = '',
+    [string]$PrebuiltApk = $env:PREBUILT_APK,
     [switch]$InputKeyService,
     [switch]$HomeKeyService,
     [switch]$RestoreKeyServices
@@ -23,7 +24,9 @@ $env:TV_HOST = $TvHost
 Set-Location $PSScriptRoot
 
 # SKIP_BUILD=1 installs the APK already built (tools\docker-build.ps1 builds it in Docker, with no JDK here).
-if ($env:SKIP_BUILD -ne '1') {
+if ($PrebuiltApk) {
+    if (-not (Test-Path $PrebuiltApk)) { throw "Missing PREBUILT_APK: $PrebuiltApk" }
+} elseif ($env:SKIP_BUILD -ne '1') {
     if (-not $env:JAVA_HOME -or -not (Test-Path "$env:JAVA_HOME\bin\java.exe")) {
         $jbr = Get-ChildItem 'C:\Program Files\Android' -Directory -ErrorAction SilentlyContinue |
             ForEach-Object { Join-Path $_.FullName 'jbr' } | Where-Object { Test-Path "$_\bin\java.exe" } | Select-Object -First 1
@@ -68,7 +71,7 @@ if (-not $StockLauncher) {
 Write-Host "Stock launcher: $StockLauncher"
 $disableStock = if ($StockLauncher -eq 'none') { 'echo stock launcher left alone' } else { "pm disable-user --user 0 $StockLauncher" }
 
-$apk = 'app\build\outputs\apk\release\app-release.apk'
+$apk = if ($PrebuiltApk) { (Resolve-Path $PrebuiltApk).Path } else { 'app\build\outputs\apk\release\app-release.apk' }
 & $py -I ..\tools\b64push.py $apk /data/local/tmp/tvhome.apk
 if ($LASTEXITCODE -ne 0) { throw 'APK upload failed' }
 $out = & $py -I ..\tools\tv.py 'pm install -r /data/local/tmp/tvhome.apk; rm -f /data/local/tmp/tvhome.apk'
