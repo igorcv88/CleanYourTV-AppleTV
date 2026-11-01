@@ -12,8 +12,8 @@ and once a picture is in place the row is still refused:
     AssertionError: 'x/screenshot.jpg' not found in '| [x](x/) | ... | wanted |': the addons/README.md row
     does not show the screenshot
 
-The same page left out that a new folder carries its own Gradle wrapper, which the add-on workflow refuses
-to build ("addons/x has no gradlew"), so a folder copied from a template without `gradlew` never builds.
+The same page left out that a new folder carries its own Gradle wrapper. This fork's manual
+release refuses to package an add-on without a wrapper, while its build stays a local operation.
 
 Two rules the checkers gained since are missing from it in the same way, and a folder built from the page
 as it reads now still fails both. Its row is the only place the add-ons table's Permissions column is
@@ -32,7 +32,7 @@ puts that path in the commit:
     addons/recipe-check/.gitignore carries: (no .gitignore)
 
 These tests read every requirement out of the checkers themselves (`tests/test_addons.py`,
-`.github/workflows/addons.yml`, `tests/test_addon_local_properties_ignored.py` and
+`.github/workflows/release.yml`, `tests/test_addon_local_properties_ignored.py` and
 `tests/test_addon_permissions_index.py`), so an assertion about the page can only pass while the checker
 really enforces what it asks for: if one stops, the pair fails and the page has to be re-read rather than
 silently kept in step.
@@ -44,7 +44,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PAGE = ROOT / "docs/workflows/addon.md"
 ADDON_TESTS = ROOT / "tests/test_addons.py"
-ADDON_WORKFLOW = ROOT / ".github/workflows/addons.yml"
+ADDON_WORKFLOW = ROOT / ".github/workflows/release.yml"
 LOCAL_PROPERTIES_TESTS = ROOT / "tests/test_addon_local_properties_ignored.py"
 PERMISSIONS_TESTS = ROOT / "tests/test_addon_permissions_index.py"
 
@@ -92,7 +92,7 @@ class RecipeTest(unittest.TestCase):
                          f"expected one step creating the Gradle project, found {len(project)}")
         self.assertIn("gradlew", project[0],
                       "the step that creates addons/<name>/ does not ask for its own gradlew wrapper, and\n"
-                      ".github/workflows/addons.yml refuses to build a folder without one")
+                      "the manual release requires a Gradle wrapper in each add-on")
 
     def test_the_recipe_asks_for_the_local_properties_ignore(self):
         ignore = steps_naming(self.text, ".gitignore")
@@ -131,10 +131,10 @@ class CheckerTest(unittest.TestCase):
                       "tests/test_addons.py no longer requires the row to show the screenshot; the row step's\n"
                       "wording can go")
 
-    def test_the_addon_workflow_still_refuses_a_folder_without_its_wrapper(self):
+    def test_the_manual_release_still_refuses_an_addon_without_its_wrapper(self):
         text = ADDON_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("addons/$a/gradlew", text,
-                      ".github/workflows/addons.yml no longer refuses a folder without gradlew; the recipe's\n"
+        self.assertIn('"$addon/gradlew"', text,
+                      "the manual release no longer refuses a folder without gradlew; the recipe's\n"
                       "wrapper step can go")
 
     def test_the_local_properties_check_still_asks_git_about_the_file(self):

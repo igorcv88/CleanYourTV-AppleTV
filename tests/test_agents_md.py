@@ -19,7 +19,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 AGENTS = ROOT / "AGENTS.md"
 WORKFLOWS = ROOT / "docs" / "workflows"
-CI = ROOT / ".github" / "workflows" / "ci.yml"
+RELEASE = ROOT / ".github" / "workflows" / "release.yml"
 GRADLE = ROOT / "launcher" / "app" / "build.gradle"
 
 EXTENSION = re.compile(r"\.(md|py|sh|ps1|yml|yaml|gradle|xml|json|txt|jpg|png|java)$")
@@ -142,12 +142,12 @@ class AgentsSizeTest(unittest.TestCase):
 
 
 class AgentsNumbersTest(unittest.TestCase):
-    def test_apk_gate_matches_ci(self):
-        gate = int(re.search(r'test "\$size" -lt (\d+)', CI.read_text(encoding="utf-8")).group(1))
+    def test_apk_gate_matches_manual_release(self):
+        gate = int(re.search(r'test "\$size" -lt (\d+)', RELEASE.read_text(encoding="utf-8")).group(1))
         stated = re.findall(r"([\d,]+) B \((\d+) KB\)", text())
         self.assertTrue(stated, "AGENTS.md no longer states the APK gate as 'N B (N KB)'")
         for size, kb in stated:
-            self.assertEqual(int(size.replace(",", "")), gate, "AGENTS.md and ci.yml disagree on the APK gate")
+            self.assertEqual(int(size.replace(",", "")), gate, "AGENTS.md and manual release disagree on the APK gate")
             self.assertEqual(int(kb), gate // 1024, "the KB figure next to the gate is wrong")
 
     def test_min_sdk_matches_build_gradle(self):
@@ -157,14 +157,14 @@ class AgentsNumbersTest(unittest.TestCase):
         for value in stated:
             self.assertEqual(value, min_sdk, "AGENTS.md and launcher/app/build.gradle disagree on minSdk")
 
-    def test_commands_are_the_ones_ci_runs(self):
-        ci = CI.read_text(encoding="utf-8")
+    def test_commands_are_the_ones_manual_release_runs(self):
+        release = RELEASE.read_text(encoding="utf-8")
         for command in ("tools/venv/bin/python -m unittest discover -s tests -v",
                         "./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease",
                         "CLEANYOURTV_STRICT"):
             with self.subTest(command=command):
-                self.assertIn(command, ci, "ci.yml changed; update AGENTS.md and this test")
-                self.assertIn(command, text(), "AGENTS.md no longer gives the command CI runs")
+                self.assertIn(command, release, "manual release changed; update AGENTS.md and this test")
+                self.assertIn(command, text(), "AGENTS.md no longer gives the command the release runs")
 
 
 class AgentsEntryPointsTest(unittest.TestCase):

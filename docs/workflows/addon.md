@@ -23,7 +23,8 @@
    "start at boot", "overlay"), and the screenshot in the row's Screenshot column. `tests/test_addons.py`
    checks the row and the folder, and `tests/test_addon_permissions_index.py` holds the add-on's own page
    and this column to the manifest.
-7. No APKs in the repo. `tests/test_addons.py` checks all of this; `.github/workflows/addons.yml` builds the
-   add-ons that changed with `./gradlew --no-daemon assembleRelease`.
+7. No APKs in git. `tests/test_addons.py` and the **manual** `.github/workflows/release.yml`
+   check source files and Gradle wrappers before publishing the toolkit. There is no automatic add-on build:
+   build your changed add-on locally with `./gradlew --no-daemon assembleRelease` from its own folder.
 
 Then run the tests: `python3 -m unittest discover -s tests -v`.

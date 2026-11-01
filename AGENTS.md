@@ -83,7 +83,7 @@ share their TV's list afterwards, follow [`docs/workflows/tv-list.md`](docs/work
 | `addons/` | Optional module-card apps, each its own Gradle project, never built into the launcher. |
 | `tools/` | The ADB client (`tv.py`) and the scripts, listed in the README's Tools table. Shell scripts have PowerShell twins. Each script's usage is in its first lines, and the larger ones have a guide beside them (`tools/*.md`): read it before running the script. |
 | `tests/` | Python `unittest` suite: list format, README tables, press counts, themes, add-ons, the Home guard and the tools against fake TVs. |
-| `.github/workflows/` | `ci.yml` (tests, launcher build, APK size gate), `addons.yml`, `maintainer-bot.yml`. |
+| `.github/workflows/` | `release.yml`: the only workflow, manually publishes the signed APK and full Setup ZIP. |
 | `.github/maintainer/MAINTAINER.md` | The review policy the maintainer and the PR bot apply. |
 | `.github/pull_request_template.md` | The PR checklist. Fill it in. |
 
@@ -124,7 +124,7 @@ use it and ends with the check to run.
 
 | Check | Command or rule |
 |---|---|
-| Tests, as CI runs them | `tools/venv/bin/python -m unittest discover -s tests -v` after `python3 -m venv tools/venv` and `tools/venv/bin/pip install -r tools/requirements.txt`. On `main`, CI sets `CLEANYOURTV_STRICT=1`, and its "README tables" job checks that the TV tables and counts are what `tools/gen_tables.py` writes. On Windows the suites that drive `tools/*.sh` report as skipped: they need a POSIX shell, and CI runs them. |
+| Tests, as manual release runs them | `tools/venv/bin/python -m unittest discover -s tests -v` after `python3 -m venv tools/venv` and `tools/venv/bin/pip install -r tools/requirements.txt`. Manual release sets `CLEANYOURTV_STRICT=1` and checks generated tables with `tools/gen_tables.py --check`. Run locally before pushing; there is no automatic CI. |
 | Launcher, if you touched `launcher/` | JDK 17, Android SDK platform 34, build-tools 34.0.0. In `launcher/`: `./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease`. Lint must stay at zero errors. |
 | APK size gate | This fork bundles 17 themes with photos: `launcher/app/build/outputs/apk/release/app-release.apk` must be under 16,777,216 B (16384 KB). Linux: `stat -c %s`, macOS: `stat -f %z`. Keep runtime memory and startup latency low despite the larger on-disk package. |
 | README rows | A new list adds only its folder, with a `tv.json`: the TV tables, the brand grid and the counts are generated after merging, so leave them alone. A theme has its row in `themes/README.md`; an add-on in `addons/README.md`. |
@@ -139,11 +139,11 @@ use it and ends with the check to run.
 
 Never do these in a PR:
 
-- **No prebuilt APKs or binaries** in the repo, not even as CI artifacts. People build from source.
+- **No prebuilt APKs or binaries** committed in git. The owner-triggered workflow publishes a signed APK and setup ZIP directly to GitHub Releases; it does not upload Actions artifacts.
 - **No uninstalling.** No `pm uninstall` in a list or a script. `pm hide` or `pm block` only with the matching
   undo written in the list header.
-- **No network in the launcher:** no `INTERNET` permission, no network features, no analytics or telemetry, no
-  background services or polling, no blur or video. It targets TVs with 1 GB of RAM.
+- **Lightweight upstream Home stays the default.** Scenic Glass alone opts into blur, media sessions,
+  ambient video and weather networking; no analytics or telemetry. Measure RAM on low-end TVs.
 - **No new launcher dependencies** without discussing them in an issue first.
 - **No changes to the safety rules** in `PROMPT.md`, the Home guard and other safety checks in
   `tools/disable.sh`, `tools/check.py` and `launcher/build-and-install.sh`, or the list of packages the TV
@@ -155,8 +155,8 @@ Never do these in a PR:
   already has the optional DNS extra; a note that Private DNS works on that TV is fine.
 - **No secrets or identifiers** in commits, lists or screenshots: no IP addresses, Wi-Fi names, account emails,
   serial numbers, Android IDs, MAC addresses or ADB keys. Use `<tv ip>` or `192.168.1.50` in docs.
-- **Don't edit `.github/workflows/`** or the APK size gate in a normal PR. A PR whose main content is a new CI
-  workflow that builds or publishes releases is closed.
+- **No automatic Actions workflows.** Keep only the owner-triggered, signed GitHub Release workflow;
+  run tests, lint and APK size validation there. Never upload Actions artifacts.
 - **No root, no getting around app-store protection, no private builds** others cannot reproduce from this repo.
 - **No extras added to the PROMPT flow** beyond debloating and the launcher.
 - **Don't relax `minSdk`** (26) or the launcher's permissions; those are forks for `SHOWCASE.md`.
