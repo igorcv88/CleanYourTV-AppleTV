@@ -12,8 +12,9 @@ android {
         minSdk 26
         targetSdk 34
         // Apple TV Launcher's own numbering, from its 1.0 release (the original CleanYourTV was at 5 / 2.4).
-        versionCode 12
-        versionName '1.2'
+        // CI can override these for tagged releases; local builds keep upstream defaults.
+        versionCode Integer.parseInt(providers.gradleProperty('releaseVersionCode').getOrElse('12'))
+        versionName providers.gradleProperty('releaseVersionName').getOrElse('1.2')
     }
 
     // Release signing for the published APK: keystore.properties (storeFile, storePassword, keyAlias, keyPassword)
