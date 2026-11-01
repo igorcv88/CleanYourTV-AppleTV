@@ -6,32 +6,23 @@ android {
     namespace 'com.gathin.tvhome'
     compileSdk 34
 
+    sourceSets {
+        main {
+            // Ship the upstream theme catalog without keeping duplicate copies under launcher/.
+            // Previews and wallpapers are decoded only when the picker or selected theme needs them.
+            assets.srcDirs += ['../../themes']
+        }
+    }
+
     defaultConfig {
-        // Opt-in identity for firmware with a package-name HOME allowlist; see docs/devices/xiaomi-mitv-aetp0-dofus.md.
+        // Opt-in identity for firmware with a package-name HOME allowlist.
+        // Xiaomi: docs/devices/xiaomi-mitv-aetp0-dofus.md (com.ts.launcher).
+        // ColorOS TV: docs/devices/oppo-k9-55-oppocnm632.md (com.oneplus.tv.launcher2).
         applicationId providers.gradleProperty('launcherApplicationId').getOrElse('com.gathin.tvhome')
         minSdk 26
         targetSdk 34
-        // Apple TV Launcher's own numbering, from its 1.0 release (the original CleanYourTV was at 5 / 2.4).
         versionCode 12
-        versionName '1.2'
-    }
-
-    // Release signing for the published APK: keystore.properties (storeFile, storePassword, keyAlias, keyPassword)
-    // kept outside the repo, found through -PreleaseKeystore=<path> or ~/apple-tv-launcher-signing/. Without it
-    // (anyone building their own copy) the release build falls back to the debug key, as before.
-    def ksFile = file(providers.gradleProperty('releaseKeystore').getOrElse(
-            System.getProperty('user.home') + '/apple-tv-launcher-signing/keystore.properties'))
-    def ks = new Properties()
-    if (ksFile.exists()) ksFile.withInputStream { ks.load(it) }
-    signingConfigs {
-        if (ks.storeFile) {
-            release {
-                storeFile file(ks.storeFile)
-                storePassword ks.storePassword
-                keyAlias ks.keyAlias
-                keyPassword ks.keyPassword
-            }
-        }
+        versionName '3.3'
     }
 
     buildTypes {
@@ -40,8 +31,8 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            // The release key when keystore.properties is there (the published APK), else the debug key.
-            signingConfig ks.storeFile ? signingConfigs.release : signingConfigs.debug
+            // Sideloaded over ADB, never published: sign with the debug key so it installs over a debug build.
+            signingConfig signingConfigs.debug
         }
     }
 

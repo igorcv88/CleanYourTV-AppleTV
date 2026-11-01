@@ -60,9 +60,8 @@ public class TileFitTest {
         int itemH = AppAdapter.itemHeightPx(AppAdapter.tileHeightPx(w), false, D);
         int needed = itemH * 4 + Math.round((AppAdapter.TOP_ROOM_DP + AppAdapter.COMPACT_BOTTOM_ROOM_DP) * D);
         assertTrue(needed + " > " + GRID_H, needed <= GRID_H + 2);
-        // Never wider than the width-only size. (With the 1.05x Scenic focus zoom the width-only tile grew, so on
-        // this grid the height limit now decides; with the old 1.18x zoom the two were equal.)
-        assertTrue(w <= AppAdapter.tileWidthPx(INNER, 6, D));
+        // With the compact spacing the width limit decides, not the height: no extra whitespace between tiles.
+        assertEquals(AppAdapter.tileWidthPx(INNER, 6, D), w);
     }
 
     @Test

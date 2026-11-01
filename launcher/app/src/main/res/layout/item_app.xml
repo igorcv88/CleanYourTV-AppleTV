@@ -45,17 +45,8 @@
             android:ellipsize="end"
             android:textColor="#FFFFFFFF"
             android:textSize="13sp"
-            android:fontFamily="@font/inter_regular"
+            android:fontFamily="@string/font_body"
             android:visibility="gone" />
-
-        <!-- tvOS specular highlight on the focused icon, moved by TvFocusMotion.shine. The card clips it to its
-             rounded outline. -->
-        <com.gathin.tvhome.ShineView
-            android:id="@+id/glare"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:alpha="0"
-            android:importantForAccessibility="no" />
     </FrameLayout>
 
     <TextView
@@ -64,10 +55,14 @@
         android:layout_height="22dp"
         android:layout_gravity="center_horizontal|top"
         android:layout_marginTop="108dp"
+        android:includeFontPadding="false"
         android:gravity="center"
         android:singleLine="true"
         android:ellipsize="end"
         android:alpha="0"
         android:translationY="-6dp"
-        android:textAppearance="@style/TextAppearance.TV.LabelMedium" />
+        android:textColor="#F2FFFFFF"
+        android:textSize="14sp"
+        android:fontFamily="@string/font_medium"
+        android:letterSpacing="0.02" />
 </FrameLayout>

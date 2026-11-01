@@ -1,0 +1,22 @@
+{
+  "scenic_home": true,
+  "background_color": "#111C24",
+  "wallpaper": true,
+  "wallpaper_dim": 0,
+  "animations": true,
+  "advanced_effects": false,
+  "reduced_motion": false,
+  "sky_intensity": 0,
+  "ambient_glow": false,
+  "app_glow": false,
+  "dock_title": false,
+  "dock_row": false,
+  "show_greeting": false,
+  "show_network_pill": false,
+  "show_inputs_pill": false,
+  "module_cards": false,
+  "focus_overshoot": false,
+  "always_show_names": true,
+  "rows_below_dock": 0,
+  "columns": 5
+}
