@@ -142,4 +142,35 @@
     <!-- Cinematic top shelf (cinematic_home): the line under the focused dock app's name; %1$s is when it was
          last opened, e.g. "5 minutes ago" or "yesterday, 9:40 pm". -->
     <string name="last_opened">Last opened %1$s</string>
+
+    <!-- Scenic Glass Home -->
+    <string name="scenic_all_apps">All Apps</string>
+    <string name="scenic_listen">Listen</string>
+    <string name="scenic_settings">Settings</string>
+    <string name="scenic_tv_settings">TV &amp; Chromecast settings</string>
+    <string name="scenic_network">Network &amp; internet</string>
+    <string name="scenic_inputs">Inputs</string>
+    <string name="scenic_home">Home</string>
+    <string name="scenic_discover">Discover</string>
+    <string name="scenic_my_space">My Space</string>
+    <string name="scenic_apps">Apps</string>
+    <string name="scenic_search">Search</string>
+    <string name="scenic_wallpapers">Wallpapers</string>
+    <string name="scenic_appearance">Appearance</string>
+    <string name="scenic_favorites">Dock favourites</string>
+    <string name="scenic_weather">Weather</string>
+    <string name="scenic_music_access">Music on Home</string>
+    <string name="scenic_sounds">Sounds</string>
+    <string name="scenic_reorder">Reorder apps</string>
+    <string name="scenic_sleep">Sleep</string>
+    <string name="scenic_backup">Backup &amp; recovery</string>
+    <string name="scenic_advanced">Advanced launcher settings</string>
+    <string name="scenic_added">%1$s added to the Dock</string>
+    <string name="scenic_removed">%1$s removed from the Dock</string>
+    <string name="scenic_move">Move</string>
+    <string name="scenic_remove">Remove from Dock</string>
+    <string name="scenic_app_info">App info</string>
+    <string name="scenic_add_to_dock">Add to Dock</string>
+    <string name="scenic_moving">Left and Right move it. OK or Back puts it down.</string>
+    <string name="scenic_fav_hint">In Apps, hold OK on an app to add it to the Dock or remove it.</string>
 </resources>

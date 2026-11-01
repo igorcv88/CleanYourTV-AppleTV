@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The dock card being moved: a bright inner ring. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#00000000" />
+    <stroke android:width="3dp" android:color="#F2F5F6F8" />
+    <corners android:radius="16dp" />
+</shape>

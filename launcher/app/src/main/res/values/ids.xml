@@ -7,4 +7,5 @@
     <item name="motion_rot_x" type="id" />
     <item name="motion_rot_y" type="id" />
     <item name="motion_tx" type="id" />
+    <item name="tile_bg_orig" type="id" />
 </resources>
