@@ -61,6 +61,13 @@ class ManualReleaseOnlyTest(unittest.TestCase):
         self.assertNotIn("actions/upload-artifact", self.text.lower())
         self.assertNotIn("artifact upload", self.text.lower())
 
+    def test_setup_zip_excludes_linux_runner_venv(self):
+        self.assertIn("rsync -a --exclude='/venv/' tools/", self.text)
+        self.assertNotIn('cp -R tools examples', self.text)
+
+    def test_signing_properties_written_with_java_compatible_unicode(self):
+        self.assertIn('python3 tools/release_properties.py "$RUNNER_TEMP/tv-release.properties"', self.text)
+
 
 if __name__ == "__main__":
     unittest.main()

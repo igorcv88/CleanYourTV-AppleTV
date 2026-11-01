@@ -1012,26 +1012,25 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     void openNetworkSettings() { open(systemIntent(Settings.ACTION_WIFI_SETTINGS)); }
     void openTvSettings() { open(systemIntent(Settings.ACTION_SETTINGS)); }
     boolean hasInputs() {
+        // Keep the same vendor and Live TV fallbacks as the classic Inputs pill.
+        if (liveTvIntent() != null || !sourcePanelService.isEmpty()
+                || (coocaaSources && !CoocaaSources.list(this).isEmpty())) return true;
         TvInputManager manager = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
-        try { return manager != null && !manager.getTvInputList().isEmpty(); }
+        try {
+            if (manager == null) return false;
+            for (TvInputInfo info : manager.getTvInputList()) {
+                if (info.isPassthroughInput() && !info.isHidden(this)
+                        && !Integer.valueOf(-1).equals(mappedSource(info.getId()))) return true;
+            }
+            return false;
+        }
         catch (SecurityException ignored) { return false; }
     }
     void showInputsMenu() {
-        // Scenic hides the old header; its popup anchor is gone. Use a remote-friendly dialog while retaining
-        // the upstream input-launch routing (CEC, source panels, tuner) through openInput().
-        TvInputManager manager = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
-        if (manager == null) return;
-        List<TvInputInfo> inputs;
-        try { inputs = manager.getTvInputList(); }
-        catch (SecurityException ignored) { return; }
-        String[] names = new String[inputs.size()];
-        for (int i = 0; i < inputs.size(); i++) {
-            CharSequence name = inputs.get(i).loadLabel(this);
-            names[i] = name == null ? inputs.get(i).getId() : name.toString();
-        }
-        new android.app.AlertDialog.Builder(this).setTitle(R.string.inputs)
-                .setItems(names, (dialog, index) -> openInput(inputs.get(index).getId()))
-                .setNegativeButton(android.R.string.cancel, null).show();
+        // Reuse the upstream picker. Its CEC, Coocaa, source-panel and tuner logic is
+        // firmware-specific and must not be replaced with a raw TvInputManager dialog.
+        if (scenic != null) showInputs(scenic.inputsAnchor(), true);
+        else showInputs();
     }
     void openLauncherSettings() { startActivityForResult(new Intent(this, LauncherSettingsActivity.class), LAUNCHER_SETTINGS_REQUEST); }
     void startReorder() {
@@ -3533,6 +3532,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     /** Dropdown menu under the Inputs pill: HDMI ports (with connection state), AV and Live TV. */
     private void showInputs() {
+        showInputs(null, false);
+    }
+
+    private void showInputs(View scenicAnchor, boolean scenicMode) {
         // A configured source panel and no Live TV row to offer next to it: the panel is the whole menu.
         // The BYINTEK U4 needs this, as its TvInputManager lists three HDMI ports and an AV input it doesn't have.
         List<CoocaaSources.Source> coocaa = coocaaSources ? CoocaaSources.list(this) : Collections.emptyList();
@@ -3543,8 +3546,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // top_menu: the pill is gone, so the list hangs under the gear, growing inward from the right.
         // Read the switch, not the pill: show_inputs_pill=false hides the pill too, and there the list
         // keeps its usual place.
-        boolean underGear = topMenu;
-        View anchor = findViewById(underGear ? R.id.btnSettings : R.id.btnInputs);
+        boolean underGear = scenicMode || topMenu;
+        View anchor = scenicMode ? scenicAnchor
+                : findViewById(underGear ? R.id.btnSettings : R.id.btnInputs);
         View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
         LinearLayout rows = panel.findViewById(R.id.rows);
 
