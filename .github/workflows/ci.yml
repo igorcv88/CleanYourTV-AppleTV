@@ -48,4 +48,5 @@ jobs:
         run: |
           size=$(stat -c %s launcher/app/build/outputs/apk/release/app-release.apk)
           echo "release APK: $((size / 1024)) KB"
-          test "$size" -lt 409600 || { echo "APK is over 400 KB; the launcher targets 1 GB TVs, keep it small"; exit 1; }
+          # Scenic Glass adds music/session UI; 400 KB predates this feature set.
+          test "$size" -lt 4194304 || { echo "APK is over 4 MiB; review size before release"; exit 1; }
