@@ -33,7 +33,7 @@ if ($ApkPath) {
     }
     $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { "$env:LOCALAPPDATA\Android\Sdk" }
     if (-not (Test-Path local.properties)) {
-        "sdk.dir=$($sdk -replace '\\', '\')" | Out-File -Encoding ascii local.properties
+        "sdk.dir=$($sdk -replace '\\', '\\')" | Out-File -Encoding ascii local.properties
     }
     .\gradlew.bat assembleRelease -q --console=plain
     if ($LASTEXITCODE -ne 0) { throw 'Gradle build failed' }
