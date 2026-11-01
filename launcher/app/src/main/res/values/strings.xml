@@ -2,51 +2,23 @@
 <resources>
     <string name="app_name">Home</string>
     <string name="inputs">Inputs</string>
-    <string name="clock_panel">Clock</string>
     <string name="wifi">Wi-Fi</string>
     <string name="settings">Settings</string>
-    <string name="background">Background</string>
-    <string name="background_current">Playing</string>
-    <string name="background_cycle">Cycle through all</string>
-    <string name="aerials_download">Download aerials…</string>
-    <string name="aerials_loading">Loading Apple\'s aerials…</string>
-    <string name="aerials_offline">Couldn\'t reach Apple. Check the TV\'s internet connection.</string>
-    <string name="aerials_on_tv">On TV</string>
-    <string name="aerials_get">Download</string>
-    <string name="aerials_percent">%d%%</string>
-    <string name="aerials_done">%s is ready in Background</string>
-    <string name="aerials_removed">%s removed</string>
-    <string name="aerials_busy">One download at a time: wait for this one to finish</string>
-    <string name="aerials_failed">Download failed. Try again.</string>
-    <string name="aerials_no_space">Not enough space: it needs %1$d MB and the TV has %2$d MB free</string>
-    <string name="top_buttons">Top icons</string>
-    <string name="menu_tv_settings">TV settings</string>
-    <string name="menu_sleep">Sleep</string>
-    <string name="sleep_unavailable">Sleep needs the CleanYourTV sleep service: turn it on in Settings > Accessibility</string>
-    <string name="sleep_service_name">Sleep</string>
-    <string name="sleep_service_description">Lets the Home screen\'s Settings menu put the TV to sleep.</string>
-    <string name="sounds">Sounds</string>
-    <string name="sound_all">All sounds</string>
-    <string name="sound_navigation">Navigation sound</string>
-    <string name="sound_open">App open sound</string>
-    <string name="sound_on">On</string>
-    <string name="sound_off">Off</string>
-    <string name="top_button_reorder">Switch apps (Customize)</string>
-    <string name="top_button_sound">Sound</string>
-    <string name="top_button_shown">Shown</string>
-    <string name="top_button_hidden">Hidden</string>
-    <string name="sounds_on">Home sounds on</string>
-    <string name="sounds_off">Home sounds off</string>
     <string name="choose_input">Inputs</string>
     <string name="connected">Connected</string>
     <string name="standby">Standby</string>
     <string name="not_connected">No device</string>
     <string name="live_tv">Live TV</string>
     <string name="no_inputs">No inputs found</string>
+    <string name="more_inputs">More inputs</string>
     <string name="good_morning">Good morning</string>
     <string name="good_afternoon">Good afternoon</string>
     <string name="good_evening">Good evening</string>
+    <string name="good_forenoon">Good late morning</string>
     <string name="good_night">Good night</string>
+    <string name="festival_dussehra_greeting">Happy Dussehra</string>
+    <string name="festival_diwali_greeting">Happy Diwali</string>
+    <string name="festival_halloween_greeting">Happy Halloween</string>
     <string name="ethernet">Ethernet</string>
     <string name="offline">Offline</string>
     <string name="not_available">Not available on this TV</string>
@@ -54,17 +26,33 @@
     <string name="date_format">EEEE  d MMMM</string>
     <!-- Date next to the clock on Home; a locale can split it over two lines with \n. -->
     <string name="date_format_home" translatable="false">@string/date_format</string>
+    <string name="shamsi_month_farvardin">Farvardin</string>
+    <string name="shamsi_month_ordibehesht">Ordibehesht</string>
+    <string name="shamsi_month_khordad">Khordad</string>
+    <string name="shamsi_month_tir">Tir</string>
+    <string name="shamsi_month_mordad">Mordad</string>
+    <string name="shamsi_month_shahrivar">Shahrivar</string>
+    <string name="shamsi_month_mehr">Mehr</string>
+    <string name="shamsi_month_aban">Aban</string>
+    <string name="shamsi_month_azar">Azar</string>
+    <string name="shamsi_month_dey">Dey</string>
+    <string name="shamsi_month_bahman">Bahman</string>
+    <string name="shamsi_month_esfand">Esfand</string>
     <string name="stats_cpu">CPU %1$d%%</string>
-    <string name="stats_memory">Memory %1$d MB free</string>
+    <string name="stats_memory">Memory %1$d / %2$d MB</string>
     <string name="stats_storage">Storage %1$s free</string>
+    <string name="storage_gb_whole">%1$.0f GB</string>
+    <string name="storage_gb_decimal">%1$.1f GB</string>
     <string name="dream_name">Clock</string>
     <string name="vpn">VPN</string>
     <string name="vpn_off">VPN off</string>
     <string name="home_settings">Choose default home</string>
     <string name="home_settings_help">Select your original home to stop using CleanYourTV as Home, or CleanYourTV to switch back. The original launcher must be enabled and your TV must provide a home picker; use the restore script first if it was disabled.</string>
     <string name="launcher_settings">Launcher settings</string>
+    <string name="native_settings">Native settings</string>
     <string name="columns_label">Apps per row</string>
     <string name="rows_below_dock_label">Rows below dock</string>
+    <string name="dock_opacity_label">Dock band opacity</string>
     <string name="wallpaper_label">Wallpaper</string>
     <string name="wallpaper_state">Wallpaper: %1$s</string>
     <string name="wallpaper_none">None</string>
@@ -73,6 +61,8 @@
     <string name="animations_state">Animations: %1$s</string>
     <string name="advanced_effects">Advanced effects</string>
     <string name="advanced_effects_state">Advanced effects: %1$s</string>
+    <string name="open_on_start_label">Open on start</string>
+    <string name="open_on_start_state">Open on start: %1$s</string>
     <string name="advanced_effects_warning">Adds a lifted tile, icon zoom and smooth colour transitions. May increase memory use; the actual difference depends on your TV.</string>
     <string name="follow_theme">Follow theme (reset on-TV choices)</string>
     <string name="follow_theme_hint">Uses the current theme or built-in layout and motion settings. Pushing or resetting a theme also clears your on-TV choices.</string>
@@ -107,11 +97,15 @@
     <string name="card_state_new_key">New key</string>
     <string name="card_state_new_label">New name</string>
     <string name="dock_edit">Edit dock</string>
+    <!-- Settings menu: opens the system power menu (Restart on most TVs). -->
+    <string name="power_menu">Restart…</string>
     <string name="dock_edit_hint">Choose the dock place to change and press OK. Back to finish.</string>
     <string name="dock_edit_pick_app">Now choose the app to put there and press OK. Back to choose another place.</string>
+    <string name="tile_add_to_dock">Add to dock</string>
+    <string name="tile_replace_in_dock">Replace with another app</string>
+    <string name="dock_edit_pick_place">Choose the dock place for this app and press OK. Back to cancel.</string>
     <string name="reorder">Reorder apps</string>
-    <string name="customize">Customize</string>
-    <string name="aerial_dream_name">Aerials</string>
+    <string name="tile_move">Move</string>
     <string name="reorder_hint">OK picks up an app, arrows move it, Back places it. Back again to finish.</string>
     <string name="reorder_not_saved">Couldn\'t save the new order</string>
     <string name="app_library">App library</string>
@@ -132,18 +126,50 @@
     <!-- The greeting, then greeting_name: "Good morning, Mr. Trịnh". -->
     <string name="greeting_with_name">%1$s, %2$s</string>
 
-    <!-- Race-weekend panel (RaceWeekend). Session names come from the calendar. -->
+    <!-- Race-weekend panel (RaceWeekend). -->
     <string name="race_kicker">Round %1$d · %2$s · %3$s</string>
     <string name="race_kicker_no_place">Round %1$d · %2$s</string>
     <string name="race_next">%1$s in %2$s</string>
     <string name="race_lights_out">Lights out in %1$s</string>
     <string name="race_live">%1$s · live</string>
     <string name="race_finished">Chequered flag</string>
+    <string name="race_practice_1">Practice 1</string>
+    <string name="race_practice_2">Practice 2</string>
+    <string name="race_practice_3">Practice 3</string>
+    <string name="race_sprint_qualifying">Sprint qualifying</string>
+    <string name="race_sprint">Sprint</string>
+    <string name="race_qualifying">Qualifying</string>
+    <string name="race_race">Race</string>
+    <string name="race_practice_1_short">FP1</string>
+    <string name="race_practice_2_short">FP2</string>
+    <string name="race_practice_3_short">FP3</string>
+    <string name="race_sprint_qualifying_short">SQ</string>
+    <string name="race_sprint_short">SPRINT</string>
+    <string name="race_qualifying_short">QUALI</string>
+    <string name="race_race_short">RACE</string>
+    <string name="race_countdown_minutes">%1$d min</string>
+    <string name="race_countdown_hours">%1$dh %2$dm</string>
+    <string name="race_countdown_days">%1$dd %2$dh</string>
     <!-- Cinematic top shelf (cinematic_home): the line under the focused dock app's name; %1$s is when it was
          last opened, e.g. "5 minutes ago" or "yesterday, 9:40 pm". -->
     <string name="last_opened">Last opened %1$s</string>
+    <!-- game_day: a game on now, in the race panel. -->
+    <string name="game_live">Live now</string>
+    <string name="clock_format_system">System</string>
+    <string name="clock_format_12">12-hour</string>
+    <string name="clock_format_24">24-hour</string>
 
-    <!-- Scenic Glass Home -->
+    <!-- Appearance picker. Existing CleanYourTV themes remain available unchanged. -->
+    <string name="theme_gallery_title">Aparência · 17 temas</string>
+    <string name="theme_gallery_hint">Escolha com as setas do controle e pressione OK. Back volta sem alterar.</string>
+    <string name="theme_gallery_active">Em uso</string>
+    <string name="theme_gallery_press_ok">OK para aplicar</string>
+    <string name="theme_gallery_applying">Aplicando %1$s…</string>
+    <string name="theme_gallery_selected">Tema %1$s aplicado</string>
+    <string name="theme_gallery_failed">Falha ao aplicar o tema: %1$s</string>
+    <string name="theme_gallery_row">Aparência · Escolher entre 17 temas</string>
+
+    <!-- Optional Scenic Glass Home, originally developed for this fork. -->
     <string name="scenic_all_apps">All Apps</string>
     <string name="scenic_listen">Listen</string>
     <string name="scenic_settings">Settings</string>
@@ -172,4 +198,24 @@
     <string name="scenic_app_info">App info</string>
     <string name="scenic_moving">Left and Right move it. OK or Back puts it down.</string>
     <string name="scenic_fav_hint">In Apps, hold OK on an app to add it to the Dock or remove it.</string>
+
+    <!-- Optional aerial backdrop add-on in Scenic mode. -->
+    <string name="background">Background</string>
+    <string name="background_current">Playing</string>
+    <string name="background_cycle">Cycle through all</string>
+    <string name="aerials_download">Download aerials…</string>
+    <string name="aerial_dream_name">Scenic aerials</string>
+    <string name="aerials_loading">Loading Apple\'s aerials…</string>
+    <string name="aerials_offline">Couldn\'t reach Apple. Check the TV\'s internet connection.</string>
+    <string name="aerials_on_tv">On TV</string>
+    <string name="aerials_get">Download</string>
+    <string name="aerials_percent">%d%%</string>
+    <string name="aerials_done">%s is ready in Background</string>
+    <string name="aerials_removed">%s removed</string>
+    <string name="aerials_busy">One download at a time: wait for this one to finish</string>
+    <string name="aerials_failed">Download failed. Try again.</string>
+    <string name="aerials_no_space">Not enough space: it needs %1$d MB and the TV has %2$d MB free</string>
+    <string name="sleep_unavailable">Sleep requires the accessibility service, which can be enabled under TV Settings</string>
+    <string name="sleep_service_name">Sleep</string>
+    <string name="sleep_service_description">Allows the Home Settings panel to put the TV to sleep.</string>
 </resources>

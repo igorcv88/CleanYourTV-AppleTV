@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+  <!-- Illustration for the TV theme gallery, not a capture from a physical TV. -->
+  <defs>
+    <linearGradient id="sky" x1=".2" y1="0" x2=".8" y2="1">
+      <stop stop-color="#526f92"/><stop offset=".44" stop-color="#b29e9c"/>
+      <stop offset=".79" stop-color="#516d80"/><stop offset="1" stop-color="#223a4e"/>
+    </linearGradient>
+    <linearGradient id="water" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#9d9ca3"/><stop offset=".32" stop-color="#40657d"/><stop offset="1" stop-color="#152b3f"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#ecf5ff" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#a6c5d4" stop-opacity=".16"/>
+    </linearGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#14202e" stop-opacity=".30"/><stop offset=".5" stop-color="#14202e" stop-opacity="0"/><stop offset="1" stop-color="#111d2d" stop-opacity=".24"/>
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-100%" width="200%" height="300%">
+      <feGaussianBlur stdDeviation="17"/>
+    </filter>
+  </defs>
+  <rect width="960" height="540" fill="url(#sky)"/>
+  <circle cx="668" cy="216" r="59" fill="#ffe8c5" opacity=".63"/>
+  <path d="M0 316 L92 231 L143 260 L270 177 L357 273 L454 219 L581 314 L683 247 L798 323 L886 237 L960 312 L960 540 L0 540Z" fill="#6f8791" opacity=".70"/>
+  <path d="M0 354 L107 282 L192 322 L303 244 L413 344 L561 258 L672 345 L772 276 L908 345 L960 311 L960 540 L0 540Z" fill="#3e6675" opacity=".86"/>
+  <path d="M0 383 Q180 352 352 377 T689 371 T960 375 L960 540 L0 540Z" fill="url(#water)"/>
+  <path d="M0 418 Q116 406 236 415 T480 420 T719 414 T960 422" fill="none" stroke="#e8e6db" stroke-opacity=".18" stroke-width="2"/>
+  <rect width="960" height="540" fill="url(#fade)"/>
+  <text x="62" y="66" fill="#f6f8f9" opacity=".9" font-family="sans-serif" font-size="15">19°  ·  Céu claro</text>
+  <text x="770" y="67" fill="#fcfeff" font-family="sans-serif" font-weight="300" font-size="25">18:42</text>
+  <circle cx="896" cy="59" r="26" fill="#d1ebf3" fill-opacity=".18" stroke="#ffffff" stroke-opacity=".43" stroke-width="1"/>
+  <g stroke="#fff" stroke-width="2.5" opacity=".94" fill="none" stroke-linecap="round"><circle cx="896" cy="59" r="8"/><path d="M896 45v4 M896 69v4 M882 59h4 M906 59h4 M886 49l3 3 M903 66l3 3 M906 49l-3 3 M889 66l-3 3"/></g>
+  <!-- Dock is a lifted, thin-edged translucent surface, not a dark footer. -->
+  <rect x="52" y="377" width="856" height="126" rx="27" fill="#000000" fill-opacity=".34" filter="url(#shadow)"/>
+  <rect x="52" y="369" width="856" height="126" rx="27" fill="url(#glass)" stroke="#f5fdff" stroke-opacity=".54" stroke-width="1.5"/>
+  <g transform="translate(75 389)">
+    <rect width="146" height="88" rx="11" fill="#151515"/><text x="73" y="57" font-family="sans-serif" text-anchor="middle" font-size="29" font-weight="700" fill="#e50914">NETFLIX</text>
+    <rect x="160" width="146" height="88" rx="11" fill="#fdfdfd"/><rect x="204" y="28" width="61" height="34" rx="11" fill="#ff0033"/><path d="M227 37l15 8-15 8z" fill="#fff"/>
+    <rect x="320" width="146" height="88" rx="11" fill="#0d703c"/><circle cx="393" cy="43" r="28" fill="#1ed760"/><path d="M376 37q18-6 36 3 M379 45q18-4 32 3 M382 53q15-3 26 3" fill="none" stroke="#093b27" stroke-width="4" stroke-linecap="round"/>
+    <rect x="480" width="146" height="88" rx="11" fill="#21365d"/><text x="553" y="51" font-family="sans-serif" text-anchor="middle" font-size="21" fill="#fff">Cinema</text>
+    <rect x="640" width="146" height="88" rx="11" fill="#c0d1e0" fill-opacity=".17" stroke="#e8f6ff" stroke-opacity=".35"/><rect x="696" y="28" width="35" height="27" rx="4" fill="none" stroke="#f9feff" stroke-width="3"/><path d="M700 24h5 M719 24h5" stroke="#fff" stroke-width="3"/><text x="713" y="71" font-family="sans-serif" text-anchor="middle" font-size="12" fill="#f9feff">All Apps</text>
+  </g>
+</svg>

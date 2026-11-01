@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- tvOS pill: Liquid Glass at rest, solid bright white when focused (dark text, pill_text). -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape android:shape="rectangle">
-            <solid android:color="#F7FFFFFF" />
+            <solid android:color="#F5FFFFFF" />
             <corners android:radius="21dp" />
         </shape>
     </item>
-    <!-- Customize button while rearranging (focus is on the tiles then). -->
+    <!-- Reorder button while reorder mode is on (focus is on the tiles then). -->
     <item android:state_activated="true">
         <shape android:shape="rectangle">
             <solid android:color="#596EC1FF" />
@@ -16,6 +15,10 @@
         </shape>
     </item>
     <item>
-        <drawable class="com.gathin.tvhome.LiquidGlassDrawable" />
+        <shape android:shape="rectangle">
+            <gradient android:angle="270" android:startColor="#2EFFFFFF" android:endColor="#14FFFFFF" />
+            <stroke android:width="1dp" android:color="#38FFFFFF" />
+            <corners android:radius="21dp" />
+        </shape>
     </item>
 </selector>

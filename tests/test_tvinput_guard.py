@@ -53,6 +53,8 @@ class TvInputGuardTest(unittest.TestCase):
                 '  *resolve-activity*) echo "com.google.android.tvlauncher/.MainActivity" ;;\n'
                 '  *query-activities*) echo "  com.google.android.tvlauncher/.MainActivity" ;;\n'
                 '  *getprop*) echo 1 ;;\n'
+                # The read-back after the batch (#1376) answers nothing, so CAPTURE keeps the batch.
+                '  *"pm list packages -e"*) ;;\n'
                 # recovery.py --save and the batch: the batch is the last write, so CAPTURE holds it.
                 '  *) cat > "$CAPTURE" ;;\n'
                 "esac\n")
@@ -60,6 +62,8 @@ class TvInputGuardTest(unittest.TestCase):
             (repo / "debloat.txt").write_text(LIST)
             capture = Path(tmp) / "commands.txt"
             env = dict(os.environ, CAPTURE=str(capture), **(extra_env or {}))
+            if os.name != "posix" or not shutil.which("bash"):
+                raise unittest.SkipTest("disable.sh is a POSIX script; it needs bash")
             result = subprocess.run(["bash", str(tools / "disable.sh"), "debloat.txt"], cwd=repo,
                                     env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -74,6 +78,14 @@ class TvInputGuardTest(unittest.TestCase):
         self.assertIn(f"Skipping {MEDIATEK}", stderr)
         self.assertIn("TV_INPUT_HARDWARE", stderr)
         self.assertIn("TVINPUT_ALLOW=1", stderr)
+
+    def test_the_skip_message_says_how_to_spot_a_false_positive(self):
+        # The permission alone is a loose test: a preloaded app can ask for it and drive no input
+        # (a MediaTek USB media player on a Vestel shandao set). The owner is the one who has to
+        # judge that, so the message has to name the check that settles it.
+        _, stderr = self.run_disable([MEDIATEK])
+        self.assertIn("pm query-services --components -a android.media.tv.TvInputService", stderr)
+        self.assertIn("false positive", stderr)
 
     def test_crlf_from_adb_still_matches(self):
         # adb can end a line with CRLF; a stray CR would leave the name unmatched and the port broken.

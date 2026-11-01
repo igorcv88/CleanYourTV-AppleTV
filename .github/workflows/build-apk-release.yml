@@ -1,0 +1,158 @@
+name: CleanYourTV Scenic — signed Android TV release
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Publish a beta first; stable only after physical TV validation
+        required: true
+        type: choice
+        default: beta
+        options: [beta, stable]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cleanyourtv-scenic-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platforms;android-34 build-tools;34.0.0
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate signing secrets and calculate monotonic Android version
+        id: release
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [[ -n "${!name:-}" ]] || { echo "Missing GitHub secret: $name" >&2; exit 1; }
+          done
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/tv-release.jks"
+          keytool -list -keystore "$RUNNER_TEMP/tv-release.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          def escaped(s):
+              return s.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace('=', '\\=').replace(':', '\\:').replace('#', '\\#').replace('!', '\\!')
+          values = {
+              'storeFile': str(Path(os.environ['RUNNER_TEMP']) / 'tv-release.jks'),
+              'storePassword': os.environ['KEYSTORE_PASSWORD'],
+              'keyAlias': os.environ['KEY_ALIAS'],
+              'keyPassword': os.environ['KEY_PASSWORD'],
+          }
+          Path(os.environ['RUNNER_TEMP'], 'tv-release.properties').write_text(
+              ''.join(f'{k}={escaped(v)}\n' for k,v in values.items()), encoding='utf-8')
+          PY
+          version="3.3.0-scenic.${CHANNEL}.${GITHUB_RUN_NUMBER}"
+          version_code=$((330000 + GITHUB_RUN_NUMBER))
+          tag="v${version}"
+          git fetch --tags --force origin
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "Release tag already exists: $tag" >&2; exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "code=$version_code"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run tests, lint and signed build
+        working-directory: launcher
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          CODE: ${{ steps.release.outputs.code }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease \
+            -PreleaseKeystore="$RUNNER_TEMP/tv-release.properties" \
+            -PreleaseVersionName="$VERSION" -PreleaseVersionCode="$CODE"
+
+      - name: Verify signing key, APK identity and digest
+        id: apk
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          CODE: ${{ steps.release.outputs.code }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          source_apk=launcher/app/build/outputs/apk/release/app-release.apk
+          test -s "$source_apk"
+          apksigner="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          aapt="$ANDROID_HOME/build-tools/34.0.0/aapt"
+          cert="$($apksigner verify --verbose --print-certs "$source_apk")"
+          if grep -qi 'CN=Android Debug' <<< "$cert"; then echo 'Debug signing forbidden' >&2; exit 1; fi
+          actual="$(awk '/certificate SHA-256 digest:/{print $NF; exit}' <<< "$cert" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          expected="$(keytool -list -v -keystore "$RUNNER_TEMP/tv-release.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" \
+            | awk -F': ' '/SHA256:/{print $2; exit}' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          test -n "$actual" && test "$actual" = "$expected"
+          badging="$($aapt dump badging "$source_apk" | head -n 1)"
+          [[ "$badging" == *"name='com.gathin.tvhome'"* ]]
+          [[ "$badging" == *"versionCode='$CODE'"* ]]
+          [[ "$badging" == *"versionName='$VERSION'"* ]]
+          mkdir -p release
+          file="CleanYourTV-Scenic-v${VERSION}.apk"
+          cp "$source_apk" "release/$file"
+          (cd release && sha256sum "$file" > "$file.sha256")
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+
+      - name: Package all upstream optimization tools and the Home installer
+        id: kit
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          APK: ${{ steps.apk.outputs.file }}
+        run: |
+          set -euo pipefail
+          name="CleanYourTV-Scenic-v${VERSION}-Setup"
+          stage="$RUNNER_TEMP/$name"
+          mkdir -p "$stage/launcher" "$stage/installer"
+          cp "release/$APK" "$stage/CleanYourTV-Scenic.apk"
+          cp launcher/build-and-install.sh launcher/build-and-install.ps1 "$stage/launcher/"
+          cp installer/setup.sh installer/setup.ps1 "$stage/installer/"
+          cp installer/README.md "$stage/README.md"
+          cp -R tools examples addons themes docs "$stage/"
+          cp LICENSE "$stage/"
+          chmod +x "$stage/installer/setup.sh" "$stage/launcher/build-and-install.sh"
+          (cd "$RUNNER_TEMP" && zip -qr "$GITHUB_WORKSPACE/release/$name.zip" "$name")
+          unzip -tq "release/$name.zip"
+          (cd release && sha256sum "$name.zip" > "$name.zip.sha256")
+          echo "file=$name.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Publish exactly four useful files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          APK: ${{ steps.apk.outputs.file }}
+          ZIP: ${{ steps.kit.outputs.file }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          notes='Download the Setup ZIP for the complete CleanYourTV 3.3 toolkit, firmware-aware optimization scripts and Home installer. The standalone APK installs only the launcher. The stock Home stays enabled by default. Debloat requires an exact firmware fingerprint and explicit approval. Check the matching SHA-256 files and keep the rollback records. Scenic visuals and performance must be tested on the target TV before stable release.'
+          args=(release create "$TAG" "release/$APK" "release/$APK.sha256" "release/$ZIP" "release/$ZIP.sha256" \
+            --target "$GITHUB_SHA" --title "CleanYourTV 3.3 + Scenic Glass — $TAG" --notes "$notes")
+          if [ "$CHANNEL" = beta ]; then args+=(--prerelease --latest=false); fi
+          gh "${args[@]}"
+
+      - name: Remove signing material
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/tv-release.jks" "$RUNNER_TEMP/tv-release.properties"
