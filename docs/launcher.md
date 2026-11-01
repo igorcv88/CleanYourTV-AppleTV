@@ -2,8 +2,10 @@
 
 [Back to the README](../README.md#the-launcher)
 
-A small native home screen for Android TV: **about 572 KB**, plain Java, built for TVs with 1 GB of RAM.
-No blur, no video, no network permission, no background services. This page has the details the
+A native home screen for Android TV built in Java, with the lightweight upstream layout as its
+default. The optional Scenic Glass layout uses artwork, background blur and Android media sessions.
+This fork packages all 17 themes and their wallpaper collections directly in the APK; the original
+upstream size estimate (about 572 KB) therefore does not apply. This page has the details the
 README leaves out: settings, languages, remote keys and building it yourself. Every key a theme can
 set is in [`themes/README.md`](../themes/README.md#keys), and the opt-in switches with their
 screenshots are in [`docs/switches.md`](switches.md).
@@ -38,6 +40,10 @@ Click **Settings** for the TV's own settings. Hold OK on it for its menu:
 
 - **Launcher settings**. With `launcher_settings_button` a click opens those instead, and the menu
   leaves the row out.
+- **Aparência · Escolher entre 17 temas** opens the on-TV theme gallery. Use D-pad arrows to navigate,
+  OK to apply a theme and Back to return. The 16 original CleanYourTV themes remain available;
+  **Scenic Glass** is the seventeenth, opt-in theme. Choosing a new theme installs its configuration
+  and wallpaper collection locally and remembers the previous theme for recovery if applying fails.
 - **Native settings**, where the TV ships a settings app of its own beside Android's - Xiaomi China,
   TCL/FFALCON and Fire OS are in `settings_fallback_components` - because that app holds pages
   Android's has no row for, such as Xiaomi's Account & Security with the ADB switch.
@@ -50,6 +56,8 @@ Click **Settings** for the TV's own settings. Hold OK on it for its menu:
 
 The launcher's own page has these rows, top to bottom:
 
+- **Aparência · Escolher entre 17 temas**. This opens the same remote-operated gallery without
+  requiring a computer or ADB.
 - **Reorder apps**, only with `launcher_settings_button`, the same as the menu's.
 - **Apps per row** 4, 5, 6 or 7; **Rows below dock** 0 to 3, how many rows of tiles stay visible under the
   dock band; **Dock band opacity** 100%, 70%, 50% or 30%. The last two only do anything while the dock is

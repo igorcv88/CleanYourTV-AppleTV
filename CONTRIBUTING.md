@@ -113,8 +113,9 @@ build-tools 34.0.0; on macOS `brew install openjdk@17 android-commandlinetools` 
 
 No TV on the network, or an APK for someone else to install? Build it on its own: from `launcher/`,
 `./gradlew --no-daemon assembleRelease` leaves it at
-`launcher/app/build/outputs/apk/release/app-release.apk`, which has to stay under 589,824 B (576 KB);
-CI builds with the same command and refuses a bigger one. Gradle also has to find the SDK, and this is
+`launcher/app/build/outputs/apk/release/app-release.apk`, which has to stay under 16,777,216 B (16384 KB)
+in this fork because it includes 17 themes and offline artwork; CI builds with the same command and
+refuses a bigger one. Gradle also has to find the SDK, and this is
 where a hand build stops: `launcher/build-and-install.sh` writes the gitignored
 `launcher/local.properties` for you, so by hand either run
 `ANDROID_HOME=~/Android/Sdk ./gradlew --no-daemon assembleRelease` or put `sdk.dir=<sdk>` in that file;

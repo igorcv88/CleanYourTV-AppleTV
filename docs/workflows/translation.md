@@ -29,10 +29,10 @@
    the default `strings.xml`. A missing string falls back to English (`launcher/app/lint.xml`), but a new switch
    needs its strings in every locale.
 6. Moving hard-coded text into resources is welcome; do not bundle unrelated build changes with it.
-7. Check the size gate before you push. A language's strings ship in the release APK, and that APK has to
-   stay under 589,824 B (576 KB): `launcher/app/build/outputs/apk/release/app-release.apk`, measured with
+7. Check the size gate before you push. A language's strings ship in the release APK, and this fork's
+   bundled 17 themes require the APK to stay under 16,777,216 B (16384 KB): `launcher/app/build/outputs/apk/release/app-release.apk`, measured with
    `stat -c %s` on Linux or `stat -f %z` on macOS, and checked by the "Launcher build and unit tests" job
-   on every pull request. `README.md` quotes the launcher at about 572 KB, so a full language can be the
+   on every pull request. The upstream 572 KB estimate excludes this fork's bundled theme art, so a full language can be the
    difference between green and a failed build. A language that does not fit is a maintainer decision, not
    something to land by dropping strings ([#1271](https://github.com/Gathin23/cleanyourtv/issues/1271)).
 8. Build the launcher, set the TV's language (Android 13+: `tools/tv.py 'cmd locale set-app-locales com.gathin.tvhome --locales <tag>'`)
