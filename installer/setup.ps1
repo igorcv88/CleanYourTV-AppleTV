@@ -87,3 +87,4 @@ if ($profile) {
     }
 }
 Write-Host 'Keep this folder and the recovery records under your user profile (\.cleanyourtv).'
+Write-Host 'After checking the TV, turn ADB debugging OFF and reboot it.'
