@@ -104,6 +104,12 @@ final class Config {
     final List<RaceWeekend.Race> raceCalendar;
     /** Cinematic top shelf (config.xml, cinematic_home): the focused dock app's artwork behind a larger shelf. */
     final boolean cinematicHome;
+    /**
+     * Scenic Glass Home (config.xml scenic_home, a theme's "scenic_home", or the on-TV choice): the floating
+     * favourites dock over open scenery, with this grid as the Apps screen. Forces dock_row and cinematic off.
+     */
+    boolean scenicHome;
+    static final String SCENIC_KEY = "scenic_home", REDUCED_MOTION_KEY = "reduced_motion";
 
     private Config(List<String> dockApps, boolean fillDock, List<String> hiddenApps, String liveTvPackage,
                    String liveTvAction, Map<String, String> launchActions, Map<String, String> appLabels,
@@ -198,6 +204,7 @@ final class Config {
         int[] inputKeycodes = res.getIntArray(R.array.input_key_keycodes);
         List<String> appKeys = new ArrayList<>(Arrays.asList(res.getStringArray(R.array.app_keys)));
         boolean cinematic = res.getBoolean(R.bool.cinematic_home);
+        boolean scenic = res.getBoolean(R.bool.scenic_home);
         boolean applied = false;
 
         File dir = dir(ctx);
@@ -238,6 +245,7 @@ final class Config {
             inputKeycodes = intArray(json, "input_key_keycodes", inputKeycodes);
             appKeys = stringList(json, "app_keys", appKeys);
             cinematic = bool(json, "cinematic_home", cinematic);
+            scenic = bool(json, "scenic_home", scenic);
         }
         // A theme push or reset invalidates choices made on the TV. On first use, remember the
         // current theme without clearing choices from an older launcher version.
@@ -248,6 +256,15 @@ final class Config {
         int chosenRows = choices.getInt(ROWS_BELOW_DOCK_KEY, rowsBelow);
         if (chosenRows >= 0 && chosenRows <= 3) rowsBelow = chosenRows;
         animations = choices.getBoolean("animations", animations);
+        scenic = choices.getBoolean(SCENIC_KEY, scenic);
+        reducedMotion = choices.getBoolean(REDUCED_MOTION_KEY, reducedMotion);
+        if (scenic) {
+            // The grid becomes the Apps screen: one plain grid with names, no dock band, no shelf.
+            dockRow = false;
+            rowsBelow = 0;
+            dockTitle = false;
+            cinematic = false;
+        }
         advancedEffects = choices.getBoolean("advanced_effects", advancedEffects);
         File wallpaper = dir != null ? new File(dir, WALLPAPER_NAME) : null;
         if (wallpaper != null && !(wallpaper.isFile() && wallpaper.length() > 0)) wallpaper = null;
@@ -284,7 +301,7 @@ final class Config {
         Festival festival = json == null ? Festival.NONE : Festival.parse(string(json, "festival", ""),
                 string(json, "festival_until", ""), string(json, "greeting", ""), string(json, "accent_color", ""));
 
-        return new Config(dock, fillDock, hidden, liveTv, liveTvAction, packageMap(launchActions), packageMap(appLabels),
+        Config cfg = new Config(dock, fillDock, hidden, liveTv, liveTvAction, packageMap(launchActions), packageMap(appLabels),
                 packageMap(appBanners), panelService,
                 panelAction, inputAction,
                 Math.max(1, columns), Math.max(0, rowsBelow), animations, advancedEffects,
@@ -292,6 +309,8 @@ final class Config {
                 Math.max(0, Math.min(100, skyIntensity)), settingsKeycodes, settingsKeyPanel, wallpaperEnabled, wallpaper,
                 wallpapers, rotationMinutes, wallpaperDim, applied,
                 festival, inputKeycodes, appKeys, json == null ? Collections.emptyList() : raceCalendar(json), cinematic);
+        cfg.scenicHome = scenic;
+        return cfg;
     }
 
     /**

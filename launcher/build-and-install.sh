@@ -160,4 +160,10 @@ enable_service() {   # appends to enabled_accessibility_services without droppin
 enable_service SleepService
 if [ "${INPUT_KEY_SERVICE:-0}" = 1 ]; then enable_service InputKeyService; fi
 if [ "${HOME_KEY_SERVICE:-0}" = 1 ]; then enable_service HomeKeyService; fi
+# Scenic Home's Glass Current reads the active media sessions, which Android allows a launcher only with
+# notification access. Off unless asked for (it is the owner's choice); the Settings panel offers it too.
+#   MEDIA_ACCESS=1        grants notification-listener access to MediaAccessService (reads media sessions only)
+if [ "${MEDIA_ACCESS:-0}" = 1 ]; then
+  "$PY" -I ../tools/tv.py "cmd notification allow_listener com.gathin.tvhome/com.gathin.tvhome.MediaAccessService && echo media access granted"
+fi
 echo "Installed. Press Home on the remote to see it."

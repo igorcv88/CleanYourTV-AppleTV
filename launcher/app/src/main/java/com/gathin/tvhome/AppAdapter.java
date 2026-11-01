@@ -59,6 +59,12 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
         /** An app was just launched from a tile. */
         default void onAppOpened() { }
+
+        /** The package just launched (Scenic Home's Recents for Discover). */
+        default void onAppLaunched(String pkg) { }
+
+        /** Hold OK on a grid tile; true when handled (Scenic Home: add to or remove from the Dock). */
+        default boolean onTileLongPressed(Entry e) { return false; }
     }
 
     static final class Entry {
@@ -74,6 +80,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         final String name;
         /** Ambient glow colour; 0 until sampled from the banner, or the card's accent from the start. */
         int ambient;
+        /** BannerFit caches: the letterbox colour of a banner and the brand card behind a fallback icon. */
+        int edgeColor, cardColor;
 
         Entry(String label, ComponentName component, Drawable banner, Drawable icon) {
             this(APP, label, component, banner, icon, null, 0);
@@ -224,6 +232,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         this.launchActions = cfg.launchActions;
         this.appLabels = cfg.appLabels;
         this.appBanners = cfg.appBanners;
+        this.scenic = cfg.scenicHome;
         // Tiles keep their identity across reload(), so a focused tile stays on its app instead of
         // its view being rebound to whatever app now sits in that slot.
         setHasStableIds(true);
@@ -417,24 +426,18 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             h.card.setScaleY(focused && animations ? focusScale() : 1f);
             h.card.setTranslationY(focused && advancedEffects ? -4f * ctx.getResources().getDisplayMetrics().density : 0f);
             h.card.setTranslationZ(focused && advancedEffects ? 8f * ctx.getResources().getDisplayMetrics().density : 0f);
-            h.banner.setScaleX(focused && advancedEffects ? 1.035f : 1f);
-            h.banner.setScaleY(focused && advancedEffects ? 1.035f : 1f);
+            h.banner.setScaleX(1f);
+            h.banner.setScaleY(1f);
         }
-        if (e.banner != null) {
-            h.banner.setImageDrawable(e.banner);
-            h.banner.setVisibility(View.VISIBLE);
-            h.icon.setVisibility(View.GONE);
-            h.label.setVisibility(View.GONE);
-        } else {
-            h.banner.setImageDrawable(null);
-            h.banner.setVisibility(View.GONE);
-            h.icon.setImageDrawable(e.icon);
-            h.icon.setVisibility(View.VISIBLE);
-            h.label.setText(e.label);
-            h.label.setVisibility(View.VISIBLE);
-        }
+        // Aspect-correct artwork (BannerFit): crop a true banner, letterbox an odd one, else the icon at its own
+        // proportions on a brand-coloured card. With names under the tiles (scenic) the in-tile name is not repeated.
+        h.label.setText(e.label);
+        ViewGroup.LayoutParams cardLp = h.card.getLayoutParams();
+        BannerFit.bind(h.card, h.banner, h.icon, h.label, e, cardLp.width, cardLp.height,
+                cornerRadius(cardLp.width, ctx.getResources().getDisplayMetrics().density), !scenic);
         h.card.setOnClickListener(v -> launch(e));
         h.card.setOnLongClickListener(v -> {
+            if (listener != null && listener.onTileLongPressed(e)) return true;
             Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + e.pkg));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
@@ -446,7 +449,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     }
 
     /** Opens the tile's activity by explicit component, with no extras: a card can name nothing else. */
-    private void launch(Entry e) {
+    void launch(Entry e) {
         if (e.kind == Entry.HOME_SETTINGS) {
             ctx.startActivity(new Intent(ctx, HomeSettingsActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -466,7 +469,10 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         }
         try {
             ctx.startActivity(i);
-            if (listener != null) listener.onAppOpened();
+            if (listener != null) {
+                listener.onAppOpened();
+                listener.onAppLaunched(e.pkg);
+            }
             if (cinematic) LastOpened.record(ctx, e.pkg);
             if (advancedEffects && ctx instanceof Activity) {
                 ((Activity) ctx).overridePendingTransition(R.anim.app_open_enter, R.anim.app_open_exit);
@@ -580,11 +586,24 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     /** App labels: only the focused tile shows its name, in full white, as on tvOS. */
     static float labelAlpha(boolean focused) {
-        return focused ? 1f : 0f;
+        return focused ? 1f : alwaysLabels ? 0.72f : 0f;
+    }
+
+    /** Scenic Home's Apps screen: every name shows under its card (dimmer until focused). */
+    static boolean alwaysLabels;
+
+    /** Scenic Home: names under the cards, so a fallback tile shows no name inside it. */
+    private final boolean scenic;
+
+    /** The app tiles (no empty dock slots, no Default-home tile), for the Scenic dock and search. */
+    List<Entry> entries() {
+        List<Entry> out = new ArrayList<>();
+        for (Entry e : items) if (e.kind == Entry.APP || e.kind == Entry.CARD) out.add(e);
+        return out;
     }
 
     float focusScale() {
-        return !animations ? 1f : reducedMotion ? (advancedEffects ? 1.12f : 1.10f) : TvFocusMotion.SCALE;
+        return !animations ? 1f : TvFocusMotion.SCALE;
     }
 
     /** A vivid colour sampled from the app's banner (or icon), cached per entry; a card's accent when it set one. */
@@ -595,7 +614,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         return e.ambient;
     }
 
-    private static int vividColor(Drawable live) {
+    static int vividColor(Drawable live) {
         if (live == null) return 0xFF444444;
         // Draw a private copy: changing the bounds of the drawable an ImageView shows would blank the tile.
         Drawable d = live.getConstantState() != null ? live.getConstantState().newDrawable().mutate() : live;
@@ -694,7 +713,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                 view.animate().cancel();
                 banner.animate().cancel();
                 name.animate().cancel();
-                float scale = !animations ? 1f : advancedEffects ? 1.12f : 1.10f;
+                float scale = !animations ? 1f : TvFocusMotion.SCALE;
                 float s = focused ? scale : 1f;
                 if (!animations) {
                     view.setScaleX(1f);

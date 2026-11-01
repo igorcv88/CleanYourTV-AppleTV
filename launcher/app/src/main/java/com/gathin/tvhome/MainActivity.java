@@ -275,6 +275,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             updateWifiLabel();
             sky.update();
             wallpaperPlayer.update();
+            if (scenic != null) scenic.onMinute();
             handler.postDelayed(this, MINUTE_MS);
         }
     };
@@ -286,6 +287,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         density = getResources().getDisplayMetrics().density;
         // config.xml, overlaid by config.json from a pushed theme (see Config and tools/theme.sh).
         Config cfg = Config.load(this);
+        // Scenic Glass Home (Config.scenicHome): lighter aerial scrims and names under every Apps card.
+        AerialBackdrop.scenic = cfg.scenicHome;
+        AppAdapter.alwaysLabels = cfg.scenicHome;
         settingsKeycodes = cfg.settingsKeycodes;
         settingsKeyPanel = cfg.settingsKeyPanel;
         COLUMNS = cfg.columns;
@@ -307,7 +311,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         sky = findViewById(R.id.sky);
         // Above the wallpaper (it stays as the picture when the video is missing), below everything else.
         // The Background menu's pick, else config.xml's aerial_backdrop.
-        aerial = AerialBackdrop.attach(this, root, root.indexOfChild(sky),
+        // Scenic Home's Wallpapers choice "Built-in scenery" leaves the aerial off.
+        boolean stillChosen = cfg.scenicHome && "still".equals(getSharedPreferences(ScenicHome.PREFS, MODE_PRIVATE)
+                .getString(ScenicHome.WALLPAPER_KEY, "auto"));
+        aerial = stillChosen ? null : AerialBackdrop.attach(this, root, root.indexOfChild(sky),
                 AerialBackdrop.chosen(this, getString(R.string.aerial_backdrop)), cfg.backgroundColor);
         sky.setIntensity(cfg.skyIntensity);
         glass = findViewById(R.id.glass);
@@ -460,7 +467,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (MainActivity.this.dockRow && cfg.dockTitle && rowsBelowDock > 0) want = Math.max(want, (int) (AppAdapter.TITLE_ROOM_DP * density));
             // No dock to push down: the grid starts at the top, with room for the first row's zoom and glass.
             // The grid now runs under the header, so start below it.
-            if (!MainActivity.this.dockRow) want = (int) (AppAdapter.TOP_ROOM_DP * density) + (header != null ? header.getBottom() : 0);
+            if (!MainActivity.this.dockRow) want = (int) (AppAdapter.TOP_ROOM_DP * density) + (header != null ? header.getBottom() : 0)
+                    + (scenic != null ? (int) (40 * density) : 0);   // Scenic header is taller than the pills
             // Room under the last row so the dock can slide all the way up to DOCK_PARK_TOP_DP (parkDockBy) even
             // when the app rows are too few to scroll it there by themselves; 40dp as before once there are more.
             // The band starts 10dp above the content top (6dp decoration + 8dp item padding - 24dp band margin).
@@ -626,8 +634,114 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                     .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
                     .build(), vpnCallback);
         }
+        if (cfg.scenicHome) {
+            // The grid is the Apps screen, hidden until All Apps; the old header stays laid out (invisible) so
+            // the menus it anchors (inputs, sounds, background) still drop from the top right.
+            header.setVisibility(View.INVISIBLE);
+            gridFrame().setVisibility(View.GONE);
+            boolean useStill = aerial == null && cfg.wallpapers.isEmpty();
+            scenic = new ScenicHome(this, root, cfg, useStill, root.indexOfChild(ambient));
+            if (aerial == null && !cfg.wallpapers.isEmpty()) scenic.useWallpaperScene(cfg.wallpapers.get(0));
+        }
         // Not after recreate(): the launch intent survives it and would open the settings again.
         if (savedInstanceState == null) openLauncherSettingsIfAsked(getIntent());
+    }
+
+    // ---- Scenic Glass Home hooks (ScenicHome calls these) -----------------------------------------
+
+    private ScenicHome scenic;
+    private boolean inFront;
+
+    View gridFrame() {
+        return (View) grid.getParent();
+    }
+
+    /** Focus a grid tile (-1: the last one focused); waits for the first layout after the grid was shown. */
+    void focusGridAt(int position) {
+        int target = position < 0 ? lastFocused : position;
+        if (grid.getChildCount() > 0 && !grid.isLayoutRequested()) {
+            focusTile(target);
+            return;
+        }
+        grid.getViewTreeObserver().addOnGlobalLayoutListener(new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override public void onGlobalLayout() {
+                grid.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                focusTile(target);
+            }
+        });
+        grid.requestLayout();
+    }
+
+    void launchEntry(AppAdapter.Entry e) {
+        adapter.launch(e);
+    }
+
+    List<AppAdapter.Entry> allEntries() {
+        return adapter.entries();
+    }
+
+    void playOpenSound() {
+        navSound.onAppOpened();
+    }
+
+    void playTick() {
+        navSound.noteKey();
+        navSound.onFocusMoved();
+    }
+
+    void openIntent(Intent i) {
+        open(i);
+    }
+
+    void openNetworkSettings() {
+        openNetworkPill();
+    }
+
+    boolean hasInputs() {
+        return inputsAvailable();
+    }
+
+    void showInputsMenu() {
+        showInputs();
+    }
+
+    void showSounds() {
+        showSoundsMenu(0);
+    }
+
+    void startReorder() {
+        if (!reordering) toggleReorder();
+    }
+
+    void openLauncherSettings() {
+        startActivityForResult(new Intent(this, LauncherSettingsActivity.class), LAUNCHER_SETTINGS_REQUEST);
+    }
+
+    void showAerialDownloads() {
+        showAerialStore();
+    }
+
+    void showAerialPicker() {
+        showBackgroundMenu();
+    }
+
+    /** The album wash covers the aerial: free its decoder until the music stops. */
+    void pauseAerial() {
+        if (aerial != null) aerial.pause();
+    }
+
+    void resumeAerial() {
+        if (aerial != null && inFront) aerial.resume();
+    }
+
+    @Override
+    public boolean onTileLongPressed(AppAdapter.Entry e) {
+        return scenic != null && scenic.toggleFavourite(e);
+    }
+
+    @Override
+    public void onAppLaunched(String pkg) {
+        if (scenic != null) Recents.record(this, pkg);
     }
 
     private boolean openLauncherSettingsIfAsked(Intent intent) {
@@ -651,6 +765,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         lastFocused = 0;
         lastFocusedKey = adapter.getItemCount() > 0 ? adapter.keyAt(0) : null;
         rebuildOnResume = true;
+        if (scenic != null) scenic.goHome();
     }
 
     @Override
@@ -684,7 +799,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (showStats) startStats();
         sky.update();
         wallpaperPlayer.start();
-        if (aerial != null) aerial.resume();
+        inFront = true;
+        if (aerial != null && (scenic == null || !scenic.washCovering())) aerial.resume();
+        if (scenic != null) scenic.resume();
         handler.postDelayed(minuteTick, MINUTE_MS);
         if (festive && diya != null) {
             diya.start();
@@ -757,6 +874,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         heroArtKey = null;
         cards = moduleCards ? CardFeature.run(() -> Cards.discover(this, hiddenApps, Cards.load(Cards.storeFile(this))), none) : none;
         adapter.reload(cards.isEmpty() ? none : CardFeature.run(() -> Cards.shown(cards), none));
+        if (scenic != null) scenic.onAppsChanged(adapter.entries());
         lastFocusedKey = returnKey;
         lastFocused = returnSlot;
     }
@@ -783,7 +901,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         super.onPause();
         endReorder();   // Home or another app while reordering keeps the order so far
         wallpaperPlayer.stop();
+        inFront = false;
         if (aerial != null) aerial.pause();   // frees the video decoder for the app being opened
+        if (scenic != null) scenic.pause();
         stopAmbientAnimation();
         hero.animate().cancel();
         ambient.animate().cancel();
@@ -819,6 +939,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         super.onDestroy();
         wallpaperPlayer.close();
         navSound.release();
+        if (scenic != null) scenic.release();
         ConnectivityManager cm = getSystemService(ConnectivityManager.class);
         TvInputManager tim = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
         if (tim != null) tim.unregisterCallback(inputCallback);
@@ -864,6 +985,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         TvFocusMotion.noteKey(event);   // which way the next focused icon should lean
         if (event.getAction() == KeyEvent.ACTION_DOWN && TvFocusMotion.lastDirection == event.getKeyCode()) navSound.noteKey();
         if (handleSettingsKey(event)) return true;
+        if (scenic != null && !reordering && scenic.dispatchKey(event)) return true;
         if (!reordering) return super.dispatchKeyEvent(event);
         if (dockEditing) return dispatchDockEdit(event);
         boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
@@ -1117,6 +1239,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     @Override
     public void onBackPressed() {
+        if (scenic != null && scenic.onBack()) return;
         // Home screen: Back starts the screensaver. Apps can't ask the dream manager themselves (WRITE_DREAM_STATE
         // is a system permission); SystemUI's Somnambulator can, and does so when started.
         try {
@@ -1881,6 +2004,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void focusTile(int position) {
         libraryFocusPending = false;
+        if (scenic != null && !scenic.appsShown()) {   // Scenic Home: the dock holds Home's focus
+            scenic.focusHome();
+            return;
+        }
         cancelPendingFocusScroll();
         if (adapter.appCount() == 0) {
             if (adapter.isLibraryAt(0)) focusLibrary();
@@ -2149,6 +2276,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     /** Hides the Inputs pill when it would have nothing to list: streaming boxes have no HDMI-in, AV or tuner. */
     private void updateInputsButton() {
+        btnInputs.setVisibility(inputsAvailable() && topShown(TOP_INPUTS) ? View.VISIBLE : View.GONE);
+    }
+
+    private boolean inputsAvailable() {
         boolean any = liveTvIntent() != null || !sourcePanelService.isEmpty();
         TvInputManager tim = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
         if (!any && tim != null) {
@@ -2160,7 +2291,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 }
             }
         }
-        btnInputs.setVisibility(any && topShown(TOP_INPUTS) ? View.VISIBLE : View.GONE);
+        return any;
     }
 
     /** The Live TV app's launch intent: its leanback entry point, or the configured action if it has none. */
@@ -2502,7 +2633,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     /** The Android TV settings, with the same pop as opening an app. */
-    private void openTvSettings() {
+    void openTvSettings() {
         navSound.onAppOpened();
         open(systemIntent(Settings.ACTION_SETTINGS));
     }

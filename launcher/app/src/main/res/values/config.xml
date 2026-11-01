@@ -163,4 +163,8 @@
          dots, the focus glow takes the app's colour and the dock band turns translucent. false keeps the plain
          shelf. Can also be set with "cinematic_home": true in a theme's config.json. -->
     <bool name="cinematic_home">false</bool>
+    <!-- Scenic Glass Home: a floating, horizontally scrolling favourites dock over open scenery, a quiet header
+         (weather, clock, one Settings button), the Glass Current music player and a glass Settings panel. The
+         grid above becomes the Apps screen. false brings back the classic tvOS-style grid Home. -->
+    <bool name="scenic_home">true</bool>
 </resources>

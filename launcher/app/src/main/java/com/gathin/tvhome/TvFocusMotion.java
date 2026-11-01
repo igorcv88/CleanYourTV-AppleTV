@@ -28,17 +28,21 @@ import android.view.animation.PathInterpolator;
 final class TvFocusMotion {
     private TvFocusMotion() { }
 
-    /** tvOS scales a focused icon about 15-20%. */
-    static final float SCALE = 1.18f;
-    private static final float LIFT_DP = 6f;
-    private static final float ELEVATION_DP = 18f;
-    private static final float TILT_DEG = 10f;
-    private static final long FOCUS_MS = 280;
-    private static final long UNFOCUS_MS = 200;
-    private static final long TILT_MS = 620;
-    private static final float SHINE_ALPHA = 0.85f;
+    /**
+     * Scenic Glass: a light lift instead of tvOS's 18% bulge. 1.05x, 4dp up, a soft shadow, 220 ms on a confident
+     * ease-out with no overshoot; the lean is a hint (1.5 deg) and the highlight settles in 260 ms, so a fast run
+     * of key repeats never leaves long animations stacking behind the focus.
+     */
+    static final float SCALE = 1.05f;
+    private static final float LIFT_DP = 4f;
+    private static final float ELEVATION_DP = 10f;
+    private static final float TILT_DEG = 1.5f;
+    private static final long FOCUS_MS = 220;
+    private static final long UNFOCUS_MS = 180;
+    private static final long TILT_MS = 260;
+    private static final float SHINE_ALPHA = 0.45f;
 
-    private static final Interpolator FOCUS_EASE = new PathInterpolator(0.25f, 1f, 0.5f, 1f);
+    private static final Interpolator FOCUS_EASE = new PathInterpolator(0.2f, 0.9f, 0.3f, 1f);
     private static final Interpolator UNFOCUS_EASE = new DecelerateInterpolator(1.5f);
     private static final Interpolator SETTLE_EASE = new DecelerateInterpolator(1.8f);
 
@@ -106,7 +110,7 @@ final class TvFocusMotion {
         banner.animate().cancel();
         // No sideways start for the artwork: at that instant it has not grown yet, so any shift showed the
         // tile's dark background along one edge. It only grows into its frame.
-        banner.animate().scaleX(focused ? 1.04f : 1f).scaleY(focused ? 1.04f : 1f).translationX(0f)
+        banner.animate().scaleX(focused ? 1.02f : 1f).scaleY(focused ? 1.02f : 1f).translationX(0f)
                 .setDuration(focused ? TILT_MS : UNFOCUS_MS).setInterpolator(focused ? SETTLE_EASE : UNFOCUS_EASE)
                 .start();
 
@@ -114,7 +118,7 @@ final class TvFocusMotion {
     }
 
     /** The round top-bar buttons scale less than an icon: they sit 10dp apart. */
-    private static final float BUTTON_SCALE = 1.15f;
+    private static final float BUTTON_SCALE = 1.08f;
     private static final float BUTTON_LIFT_DP = 3f;
     private static final float BUTTON_ELEVATION_DP = 10f;
 
@@ -252,8 +256,8 @@ final class TvFocusMotion {
         card.setTag(R.id.motion_scale_y, focused ? shiftX : 0f);
         card.setRotationX(0f);
         card.setRotationY(0f);
-        banner.setScaleX(focused ? 1.04f : 1f);
-        banner.setScaleY(focused ? 1.04f : 1f);
+        banner.setScaleX(focused ? 1.02f : 1f);
+        banner.setScaleY(focused ? 1.02f : 1f);
         banner.setTranslationX(0f);
         Object shineAnim = glare.getTag(R.id.motion_tx);
         if (shineAnim instanceof Animator) ((Animator) shineAnim).cancel();
@@ -266,7 +270,7 @@ final class TvFocusMotion {
 
     /** Left or Right at a row's end: a short push towards the key and a spring back, nothing moves. */
     static void bump(View card, int keyCode, float density) {
-        float d = (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ? 1f : -1f) * 7f * density;
+        float d = (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ? 1f : -1f) * 4f * density;
         Object prev = card.getTag(R.id.motion_tx);
         if (prev instanceof Animator) ((Animator) prev).cancel();
         // From and back to the icon's resting place, which is not 0 for an icon shifted in from the dock's end.
@@ -278,7 +282,7 @@ final class TvFocusMotion {
         back.setInterpolator(SETTLE_EASE);
         ObjectAnimator a = ObjectAnimator.ofPropertyValuesHolder(card,
                 PropertyValuesHolder.ofKeyframe(View.TRANSLATION_X, Keyframe.ofFloat(0f, card.getTranslationX()), out, back));
-        a.setDuration(300);
+        a.setDuration(240);
         card.setTag(R.id.motion_tx, a);
         a.start();
     }

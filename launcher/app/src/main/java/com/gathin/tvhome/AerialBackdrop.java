@@ -25,6 +25,9 @@ import java.io.File;
 final class AerialBackdrop implements SurfaceHolder.Callback {
     private static final String TAG = "TvHome.Aerial";
 
+    /** Scenic Glass Home is on (set by MainActivity before attach): lighter scrims, see the constructor. */
+    static boolean scenic;
+
     /** Not final: cycling swaps in the next aerial. */
     private File file;
     private final View cover;
@@ -50,7 +53,7 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
         if (json.isFile()) {
             try {
                 String text = new String(java.nio.file.Files.readAllBytes(json.toPath()), java.nio.charset.StandardCharsets.UTF_8);
-                if (text.startsWith("﻿")) text = text.substring(1);   // written by PowerShell, with a BOM
+                if (text.startsWith("\uFEFF")) text = text.substring(1);   // written by PowerShell, with a BOM
                 org.json.JSONArray a = new org.json.JSONArray(text);
                 for (int i = 0; i < a.length(); i++) {
                     org.json.JSONObject o = a.getJSONObject(i);
@@ -152,16 +155,18 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
         root.addView(video, index, full);
 
         // Top: a light shade under the clock and pills. Bottom: deeper, under the dock and the grid.
+        // Scenic Glass keeps the film open: a faint shade for the header text and a light one under the dock,
+        // never the deep bottom sheet the classic grid needed.
         View top = new View(context);
         top.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x8C000000, 0x26000000, 0x00000000}));
+                scenic ? new int[]{0x4D000000, 0x12000000, 0x00000000} : new int[]{0x8C000000, 0x26000000, 0x00000000}));
         root.addView(top, index + 1, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                (int) (context.getResources().getDisplayMetrics().heightPixels * 0.42f)));
+                (int) (context.getResources().getDisplayMetrics().heightPixels * (scenic ? 0.28f : 0.42f))));
         View bottom = new View(context);
         bottom.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-                new int[]{0xB3000000, 0x40000000, 0x00000000}));
+                scenic ? new int[]{0x40000000, 0x10000000, 0x00000000} : new int[]{0xB3000000, 0x40000000, 0x00000000}));
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-                (int) (context.getResources().getDisplayMetrics().heightPixels * 0.62f));
+                (int) (context.getResources().getDisplayMetrics().heightPixels * (scenic ? 0.36f : 0.62f)));
         lp.gravity = android.view.Gravity.BOTTOM;
         root.addView(bottom, index + 2, lp);
         for (View v : new View[]{top, bottom}) {
@@ -170,7 +175,7 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
         }
 
         gridDim = new View(context);
-        gridDim.setBackgroundColor(0x9E05070C);
+        gridDim.setBackgroundColor(scenic ? 0x6605070C : 0x9E05070C);
         gridDim.setAlpha(0f);
         gridDim.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         root.addView(gridDim, index + 3, full);
