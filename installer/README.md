@@ -10,6 +10,8 @@ com acesso ADB à TV; não é um único APK que faz alterações no sistema.
 2. Ative as opções de desenvolvedor e a depuração ADB na TV e confirme o computador autorizado.
 3. Descubra o IP da TV. O computador deve conseguir alcançá-la na rede local.
 4. Instale Python 3. No Windows, use PowerShell; no macOS/Linux, use Bash.
+5. Ao terminar e validar tudo, desative a depuração ADB na TV e reinicie. Você pode conferir
+   se a porta de ADB deixou de responder com `tools/adb-closed.py`.
 
 ## Instalação
 
