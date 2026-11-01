@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Verify integration commits even when PR synchronize runs are suppressed by the bot.
+    branches: [main, 'integration/**']
   pull_request:
 
 permissions:
