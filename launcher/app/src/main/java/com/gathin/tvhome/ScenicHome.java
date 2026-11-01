@@ -371,6 +371,8 @@ final class ScenicHome implements NowPlaying.Listener {
         handler.post(() -> focusDock(0));
     }
 
+    View inputsAnchor() { return settingsButton; }
+
     boolean appsShown() {
         return appsShown;
     }

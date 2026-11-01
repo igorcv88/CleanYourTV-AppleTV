@@ -67,20 +67,7 @@ jobs:
           umask 077
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/tv-release.jks"
           keytool -list -keystore "$RUNNER_TEMP/tv-release.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          def escaped(s):
-              return s.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace('=', '\\=').replace(':', '\\:').replace('#', '\\#').replace('!', '\\!')
-          values = {
-              'storeFile': str(Path(os.environ['RUNNER_TEMP']) / 'tv-release.jks'),
-              'storePassword': os.environ['KEYSTORE_PASSWORD'],
-              'keyAlias': os.environ['KEY_ALIAS'],
-              'keyPassword': os.environ['KEY_PASSWORD'],
-          }
-          Path(os.environ['RUNNER_TEMP'], 'tv-release.properties').write_text(
-              ''.join(f'{k}={escaped(v)}\n' for k,v in values.items()), encoding='utf-8')
-          PY
+          python3 tools/release_properties.py "$RUNNER_TEMP/tv-release.properties"
           version="3.3.0-scenic.${CHANNEL}.${GITHUB_RUN_NUMBER}"
           version_code=$((330000 + GITHUB_RUN_NUMBER))
           tag="v${version}"
@@ -150,7 +137,10 @@ jobs:
           cp launcher/build-and-install.sh launcher/build-and-install.ps1 "$stage/launcher/"
           cp installer/setup.sh installer/setup.ps1 "$stage/installer/"
           cp installer/README.md "$stage/README.md"
-          cp -R tools examples addons themes docs "$stage/"
+          # tools/venv is a runner-local *Linux* environment. Never bundle it:
+          # Windows/macOS installers must create their own native tools/venv.
+          rsync -a --exclude='/venv/' tools/ "$stage/tools/"
+          cp -R examples addons themes docs "$stage/"
           cp LICENSE "$stage/"
           chmod +x "$stage/installer/setup.sh" "$stage/launcher/build-and-install.sh"
           (cd "$RUNNER_TEMP" && zip -qr "$GITHUB_WORKSPACE/release/$name.zip" "$name")

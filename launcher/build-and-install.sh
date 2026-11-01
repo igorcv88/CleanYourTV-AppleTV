@@ -113,6 +113,11 @@ HOME_QUERY='cmd package resolve-activity --brief -a android.intent.action.MAIN -
 if [ "$STOCK_LAUNCHER" = none ]; then DISABLE_STOCK="echo stock launcher left alone"
 else DISABLE_STOCK="pm disable-user --user 0 $STOCK_LAUNCHER"; fi
 APK="${PREBUILT_APK:-app/build/outputs/apk/release/app-release.apk}"
+# Git Bash exposes /c/... paths, but its venv Python is a Windows executable.
+# MSYS_NO_PATHCONV prevents automatic rewriting; convert the prebuilt APK explicitly.
+if [ -n "${PREBUILT_APK:-}" ] && command -v cygpath >/dev/null 2>&1; then
+  APK="$(cygpath -w "$APK")"
+fi
 "$PY" -I ../tools/b64push.py "$APK" /data/local/tmp/tvhome.apk
 # Install on its own: in the batch below a failed install (e.g. "not enough space" on a full /data)
 # would not stop the stock launcher from being disabled.

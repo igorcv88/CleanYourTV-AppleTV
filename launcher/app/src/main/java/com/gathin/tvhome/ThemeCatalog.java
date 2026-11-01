@@ -123,37 +123,27 @@ final class ThemeCatalog {
             }
         }
         // Do not leave the previous theme's wallpaper behind when this one has none.
-        boolean movedConfig = false, movedWallpaper = false, movedCollection = false;
         try {
             Files.deleteIfExists(previousConfig.toPath());
             Files.deleteIfExists(previousWallpaper.toPath());
             deleteCollection(previousCollection);
-            if (targetConfig.isFile()) {
-                move(targetConfig, previousConfig);
-                movedConfig = true;
-            }
-            if (targetWallpaper.isFile()) {
-                move(targetWallpaper, previousWallpaper);
-                movedWallpaper = true;
-            }
-            if (targetCollection.isDirectory()) {
-                move(targetCollection, previousCollection);
-                movedCollection = true;
-            }
-            if (hasWallpaper) move(stageWallpaper, targetWallpaper);
-            if (hasCollection) move(stageCollection, targetCollection);
-            // Switch config last so a half-copied image is never exposed to Home.
-            move(stageConfig, targetConfig);
+            ThemeSwap.apply(
+                    new File[]{targetConfig, targetWallpaper, targetCollection},
+                    new File[]{previousConfig, previousWallpaper, previousCollection},
+                    new File[]{stageConfig, hasWallpaper ? stageWallpaper : null,
+                            hasCollection ? stageCollection : null},
+                    new ThemeSwap.Filesystem() {
+                        @Override public void move(File from, File to) throws IOException {
+                            ThemeCatalog.move(from, to);
+                        }
+                        @Override public void delete(File file) throws IOException {
+                            if (file.isDirectory()) deleteCollection(file);
+                            else Files.deleteIfExists(file.toPath());
+                        }
+                    });
         } catch (IOException failure) {
-            try {
-                if (hasWallpaper) Files.deleteIfExists(targetWallpaper.toPath());
-                if (hasCollection) deleteCollection(targetCollection);
-                if (movedConfig) move(previousConfig, targetConfig);
-                if (movedWallpaper) move(previousWallpaper, targetWallpaper);
-                if (movedCollection) move(previousCollection, targetCollection);
-            } catch (IOException rollback) {
-                Log.e(TAG, "Theme rollback failed", rollback);
-                failure.addSuppressed(rollback);
+            for (Throwable suppressed : failure.getSuppressed()) {
+                Log.e(TAG, "Theme rollback failed", suppressed);
             }
             throw failure;
         } finally {
