@@ -53,7 +53,7 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
         if (json.isFile()) {
             try {
                 String text = new String(java.nio.file.Files.readAllBytes(json.toPath()), java.nio.charset.StandardCharsets.UTF_8);
-                if (text.startsWith("﻿")) text = text.substring(1);   // written by PowerShell, with a BOM
+                if (text.startsWith("\uFEFF")) text = text.substring(1);   // written by PowerShell, with a BOM
                 org.json.JSONArray a = new org.json.JSONArray(text);
                 for (int i = 0; i < a.length(); i++) {
                     org.json.JSONObject o = a.getJSONObject(i);

@@ -301,7 +301,7 @@ final class ScenicHome implements NowPlaying.Listener {
         btnListen.setText(R.string.scenic_listen);
         btnListen.setTypeface(medium);
         btnListen.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        btnListen.setTextColor(a.getColorStateList(R.drawable.scenic_row_text));
+        btnListen.setTextColor(a.getColorStateList(R.color.scenic_row_text));
         btnListen.setGravity(Gravity.CENTER);
         btnListen.setPadding(dp(22), 0, dp(22), 0);
         btnListen.setBackgroundResource(R.drawable.scenic_pill_bg);
@@ -977,7 +977,7 @@ final class ScenicHome implements NowPlaying.Listener {
         openApp.setText("Open app");
         openApp.setTypeface(medium);
         openApp.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        openApp.setTextColor(a.getColorStateList(R.drawable.scenic_row_text));
+        openApp.setTextColor(a.getColorStateList(R.color.scenic_row_text));
         openApp.setGravity(Gravity.CENTER);
         openApp.setPadding(dp(22), 0, dp(22), 0);
         openApp.setBackgroundResource(R.drawable.scenic_pill_bg);
@@ -1680,7 +1680,7 @@ final class ScenicHome implements NowPlaying.Listener {
     private ImageView roundButton(int icon, int sizeDp, String description) {
         ImageView b = new ImageView(a);
         b.setImageResource(icon);
-        b.setImageTintList(a.getColorStateList(R.drawable.scenic_icon_tint));
+        b.setImageTintList(a.getColorStateList(R.color.scenic_icon_tint));
         b.setBackgroundResource(R.drawable.scenic_round_bg);
         b.setScaleType(ImageView.ScaleType.CENTER);
         b.setFocusable(true);
@@ -1717,13 +1717,13 @@ final class ScenicHome implements NowPlaying.Listener {
         r.setFocusable(true);
         r.setClickable(true);
         TextView t = text(17, medium, TEXT);
-        t.setTextColor(a.getColorStateList(R.drawable.scenic_row_text));
+        t.setTextColor(a.getColorStateList(R.color.scenic_row_text));
         t.setDuplicateParentStateEnabled(true);
         t.setText(title);
         r.addView(t, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         TextView s = text(15, regular, TEXT);
         s.setTag("status");
-        s.setTextColor(a.getColorStateList(R.drawable.scenic_row_status));
+        s.setTextColor(a.getColorStateList(R.color.scenic_row_status));
         s.setDuplicateParentStateEnabled(true);
         s.setText(status == null ? "" : status);
         s.setMaxWidth(dp(220));

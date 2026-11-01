@@ -61,8 +61,11 @@ installer, recovery script, Home component (`com.gathin.tvhome/.MainActivity`) a
   makes width-only tiles wider (documented in the test).
 - Python `tests/`: 5 failures, identical on the untouched base commit (Hebrew layout/translation coverage) —
   pre-existing, not caused by this work.
-- Release build / lint: see the final report of the session that produced this file (Maven Central rate
-  limiting, HTTP 429, affected dependency resolution in the container).
+- `./gradlew assembleRelease lintDebug`: success. Release APK (R8 minify + shrink) 1,380,660 bytes, **signed
+  with the debug key** (no release keystore in the container) — it will not install over a release-signed
+  build. Lint: 0 errors, 77 warnings (new-code warnings: notifyDataSetChanged in the dock, English literals).
+  Fixed on the way: colour selectors moved to `res/color`; literal BOM characters in three pre-existing aerial
+  files replaced by `\uFEFF` escapes (lint `ByteOrderMark` errors).
 - No emulator: the container has no KVM, so no screenshots exist. Nothing here proves visual fidelity.
 
 ## Known limitations

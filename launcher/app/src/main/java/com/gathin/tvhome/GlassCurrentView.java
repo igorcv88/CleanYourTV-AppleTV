@@ -32,6 +32,7 @@ final class GlassCurrentView extends View {
     private final Path path = new Path();
     private final Path seg = new Path();
     private final PathMeasure measure = new PathMeasure();
+    private final float[] pos = new float[2];
     private float fraction = -1f;
     private String elapsed = "", remaining = "";
     private boolean seekable;
@@ -149,7 +150,6 @@ final class GlassCurrentView extends View {
         c.drawPath(seg, glow);
         c.drawPath(seg, lit);
         if (focused) {
-            float[] pos = new float[2];
             measure.getPosTan(at, pos, null);
             c.drawCircle(pos[0], pos[1], 6f * density, knob);
         }

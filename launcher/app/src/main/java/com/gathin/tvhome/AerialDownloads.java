@@ -294,7 +294,7 @@ final class AerialDownloads {
         if (!f.isFile()) return new JSONArray();
         try {
             String text = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
-            if (text.startsWith("﻿")) text = text.substring(1);
+            if (text.startsWith("\uFEFF")) text = text.substring(1);
             return new JSONArray(text);
         } catch (Exception e) {
             return new JSONArray();

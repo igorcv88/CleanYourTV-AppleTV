@@ -170,7 +170,6 @@
     <string name="scenic_move">Move</string>
     <string name="scenic_remove">Remove from Dock</string>
     <string name="scenic_app_info">App info</string>
-    <string name="scenic_add_to_dock">Add to Dock</string>
     <string name="scenic_moving">Left and Right move it. OK or Back puts it down.</string>
     <string name="scenic_fav_hint">In Apps, hold OK on an app to add it to the Dock or remove it.</string>
 </resources>

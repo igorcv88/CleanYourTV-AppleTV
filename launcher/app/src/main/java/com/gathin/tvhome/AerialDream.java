@@ -101,7 +101,7 @@ public class AerialDream extends DreamService implements SurfaceHolder.Callback 
             File index = new File(dir, "aerials.json");
             if (index.canRead()) {
                 String json = new String(Files.readAllBytes(index.toPath()), StandardCharsets.UTF_8)
-                        .replace("﻿", "").trim();
+                        .replace("\uFEFF", "").trim();
                 JSONArray list = json.startsWith("[") ? new JSONArray(json) : new JSONArray().put(new JSONObject(json));
                 for (int i = 0; i < list.length(); i++) {
                     JSONObject o = list.getJSONObject(i);
