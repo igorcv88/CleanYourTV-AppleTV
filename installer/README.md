@@ -10,6 +10,16 @@ The separate APK installs only the launcher: it does **not** debloat the TV.
 - `tools/`, `examples/`, `addons/`, `themes/`, `docs/`: upstream v3.3 optimization scripts, profiles, add-ons, theme assets and documentation;
 - `installer/setup.sh` / `setup.ps1`: guided prebuilt-APK installation that **does not disable stock Home**.
 
+## GitHub Releases (repository owner)
+
+There is exactly one GitHub Actions workflow: `.github/workflows/release.yml`.
+It runs **only** when the owner chooses **Actions → CleanYourTV Scenic — Publish full Setup release → Run workflow**.
+That invocation validates the tools and builds/signs the Android launcher as an internal step,
+then assembles the complete Setup ZIP with the APK inside. The GitHub Release receives four downloads:
+the **Setup ZIP**, its `.sha256`, the optional standalone APK, and its `.sha256`.
+No builds run on push/PR and nothing is uploaded to the Actions artifacts store.
+This is a collection of Windows PowerShell/Linux scripts plus an Android APK; it is **not a Windows `.exe`**.
+
 ## Installation (read first)
 
 1. Extract the full ZIP on the computer. Use a computer connected to the same network as the TV.

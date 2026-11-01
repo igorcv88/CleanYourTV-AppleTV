@@ -1,4 +1,4 @@
-name: CleanYourTV Scenic — signed Android TV release
+name: CleanYourTV Scenic — Publish full Setup release
 
 on:
   workflow_dispatch:
@@ -23,6 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -31,6 +34,22 @@ jobs:
         with:
           packages: platforms;android-34 build-tools;34.0.0
       - uses: gradle/actions/setup-gradle@v4
+
+      # This is the ONLY validation workflow in the fork: tests run when the owner
+      # explicitly requests a release, never on a push or pull request.
+      - name: Validate toolkit, theme catalog and add-on sources
+        env:
+          CLEANYOURTV_STRICT: '1'
+        run: |
+          set -euo pipefail
+          python3 -m venv tools/venv
+          tools/venv/bin/pip install -q -r tools/requirements.txt
+          tools/venv/bin/python -m unittest discover -s tests -v
+          python3 tools/gen_tables.py --check
+          for addon in addons/*; do
+            [ -d "$addon" ] || continue
+            [ -f "$addon/gradlew" ] || { echo "$addon has no gradlew" >&2; exit 1; }
+          done
 
       - name: Validate signing secrets and calculate monotonic Android version
         id: release
@@ -97,6 +116,8 @@ jobs:
           set -euo pipefail
           source_apk=launcher/app/build/outputs/apk/release/app-release.apk
           test -s "$source_apk"
+          size=$(stat -c %s launcher/app/build/outputs/apk/release/app-release.apk)
+          test "$size" -lt 16777216 || { echo 'APK exceeds 16 MiB theme budget' >&2; exit 1; }
           apksigner="$ANDROID_HOME/build-tools/34.0.0/apksigner"
           aapt="$ANDROID_HOME/build-tools/34.0.0/aapt"
           cert="$($apksigner verify --verbose --print-certs "$source_apk")"

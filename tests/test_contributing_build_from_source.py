@@ -13,7 +13,7 @@ Gradle plugin needs (#1255). #1721 is a reader who reported exactly this - "not 
 launcher from my laptop" - after following the pages.
 
 Nothing is copied into the test: the command, the APK path, the size limit and the working directory
-come from `.github/workflows/ci.yml`'s `launcher` job, the platform from `launcher/app/build.gradle`'s
+come from `.github/workflows/release.yml`'s manual `publish` job, the platform from `launcher/app/build.gradle`'s
 `compileSdk`, so a page left behind by a CI or Gradle change fails here instead of misleading the next
 reader.
 
@@ -26,7 +26,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGE = ROOT / "CONTRIBUTING.md"
-CI = ROOT / ".github/workflows/ci.yml"
+CI = ROOT / ".github/workflows/release.yml"
 BUILD_GRADLE = ROOT / "launcher/app/build.gradle"
 
 HEADING = "## 2. Improve the launcher"
@@ -96,9 +96,9 @@ def job_block(ci_text, name):
 
 
 def launcher_job(ci_text):
-    block = job_block(ci_text, "launcher")
+    block = job_block(ci_text, "publish")
     if not block:
-        raise AssertionError("ci.yml has no `launcher:` job, so the build this page describes is not run")
+        raise AssertionError("the release workflow has no `publish:` job, so the build this page describes is not run")
     return block
 
 
@@ -136,7 +136,7 @@ class ContributingBuildTest(unittest.TestCase):
         self.assertGreaterEqual(len(body.splitlines()), 5,
                                 "CONTRIBUTING's launcher section was read as too few paragraphs")
 
-    def test_ci_still_builds_the_release_apk_from_launcher(self):
+    def test_manual_release_still_builds_the_apk_from_launcher(self):
         job = launcher_job(self.ci)
         self.assertIn("assembleRelease", job,
                       "ci.yml's launcher job no longer builds the release APK the page tells people to build")
