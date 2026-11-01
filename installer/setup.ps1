@@ -77,7 +77,9 @@ try {
 if ($profile) {
     Write-Host "Matched profile: $profile"
     Write-Host 'Read its comments; disabling services can affect Chromecast, tuner, HDMI and Ambilight.'
-    $answer = Read-Host 'Type OPTIMIZAR to apply, or press Enter to skip'
+    $answer = if ([Console]::IsInputRedirected) { '' } else {
+        Read-Host 'Type OPTIMIZAR to apply, or press Enter to skip'
+    }
     if ($answer -ceq 'OPTIMIZAR') {
         & (Join-Path $root 'tools\disable.ps1') -TvHost $TvHost -List $profile
         if ($LASTEXITCODE -ne 0) { throw 'Debloat did not finish; restore using tools\restore.ps1.' }
