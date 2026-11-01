@@ -235,7 +235,7 @@ jobs:
           cp installer/setup.sh installer/setup.ps1 "$stage/installer/"
           cp installer/README.md "$stage/README.md"
           cp launcher/build-and-install.sh launcher/build-and-install.ps1 "$stage/launcher/"
-          cp tools/tv.py tools/b64push.py tools/recovery.py tools/requirements.txt \
+          cp tools/tv.py tools/b64push.py tools/recovery.py tools/adb-closed.py tools/requirements.txt \
             tools/disable.sh tools/disable.ps1 tools/restore.sh tools/restore.ps1 "$stage/tools/"
           cp -R examples "$stage/examples"
           cp PROMPT.md LICENSE "$stage/"
