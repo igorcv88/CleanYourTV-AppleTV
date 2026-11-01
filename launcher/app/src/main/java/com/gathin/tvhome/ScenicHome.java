@@ -124,6 +124,9 @@ final class ScenicHome implements NowPlaying.Listener {
     private NowPlaying.Track track;
     private boolean resumed;
     private final Weather weather;
+    /** Scene decoding and painting, one thread for this Home instance; shut down in release(). */
+    private final java.util.concurrent.ExecutorService worker = Executors.newSingleThreadExecutor();
+    private boolean released;
 
     private List<String> favourites;
     private final Map<String, AppAdapter.Entry> byPkg = new HashMap<>();
@@ -338,7 +341,9 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     void release() {
+        released = true;
         nowPlaying.release();
+        worker.shutdownNow();
         Scene.reset();
     }
 
@@ -859,7 +864,9 @@ final class ScenicHome implements NowPlaying.Listener {
             fade(nowGroup, true, 0);
             fade(ribbon, true, 0);
         }
-        if (old == null || t.blurredArt != (old.blurredArt)) showWash(t.blurredArt);
+        // While the new cover decodes, the previous track's wash stays (no flash of the wallpaper between tracks);
+        // it changes once the art is ready, or fades out if the track turns out to have none.
+        if (!t.artPending && (old == null || t.blurredArt != old.blurredArt)) showWash(t.blurredArt);
         startTick();
     }
 
@@ -1631,10 +1638,11 @@ final class ScenicHome implements NowPlaying.Listener {
         root.addView(still, 0, full());
         int w = Math.max(320, a.getResources().getDisplayMetrics().widthPixels / 2);
         int h = Math.max(180, a.getResources().getDisplayMetrics().heightPixels / 2);
-        Executors.newSingleThreadExecutor().execute(() -> {
+        worker.execute(() -> {
             Bitmap img = Scenery.paint(w, h);
             Bitmap blurred = Blur.blurred(img, 96, 4);
             handler.post(() -> {
+                if (released) return;
                 BitmapDrawable d = new BitmapDrawable(a.getResources(), img);
                 d.setFilterBitmap(true);
                 still.setImageDrawable(d);
@@ -1648,13 +1656,13 @@ final class ScenicHome implements NowPlaying.Listener {
     /** A theme wallpaper behind the glass: its blurred copy, decoded small off the UI thread. */
     void useWallpaperScene(File file) {
         if (file == null) return;
-        Executors.newSingleThreadExecutor().execute(() -> {
+        worker.execute(() -> {
             BitmapFactory.Options o = new BitmapFactory.Options();
             o.inSampleSize = 8;
             Bitmap b = BitmapFactory.decodeFile(file.getPath(), o);
             if (b == null) return;
             Bitmap blurred = Blur.blurred(b, 96, 4);
-            handler.post(() -> Scene.setStill(blurred));
+            handler.post(() -> { if (!released) Scene.setStill(blurred); });
         });
     }
 

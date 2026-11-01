@@ -61,6 +61,25 @@ public class MediaTimeTest {
         assertFalse(MediaTime.can(MediaTime.ACTION_PLAY, MediaTime.ACTION_SKIP_TO_NEXT));
     }
 
+    @Test public void toggleUsesTheSpecificActionElseTheMediaKey() {
+        long both = MediaTime.ACTION_PLAY | MediaTime.ACTION_PAUSE;
+        assertEquals(MediaTime.TOGGLE_PAUSE, MediaTime.toggleCommand(both, MediaTime.STATE_PLAYING));
+        assertEquals(MediaTime.TOGGLE_PLAY, MediaTime.toggleCommand(both, MediaTime.STATE_PAUSED));
+        // A session that offers only PLAY_PAUSE gets the media key, never an unsupported play()/pause().
+        assertEquals(MediaTime.TOGGLE_MEDIA_KEY, MediaTime.toggleCommand(MediaTime.ACTION_PLAY_PAUSE, MediaTime.STATE_PLAYING));
+        assertEquals(MediaTime.TOGGLE_MEDIA_KEY, MediaTime.toggleCommand(MediaTime.ACTION_PLAY_PAUSE, MediaTime.STATE_PAUSED));
+        assertEquals(MediaTime.TOGGLE_MEDIA_KEY,
+                MediaTime.toggleCommand(MediaTime.ACTION_PLAY | MediaTime.ACTION_PLAY_PAUSE, MediaTime.STATE_PLAYING));
+        assertEquals(MediaTime.TOGGLE_NONE, MediaTime.toggleCommand(MediaTime.ACTION_PLAY, MediaTime.STATE_PLAYING));
+        // The button is shown exactly when there is a command to send.
+        for (long actions : new long[]{0, MediaTime.ACTION_PLAY, MediaTime.ACTION_PAUSE, both, MediaTime.ACTION_PLAY_PAUSE}) {
+            for (int state : new int[]{MediaTime.STATE_PLAYING, MediaTime.STATE_PAUSED, MediaTime.STATE_BUFFERING}) {
+                assertEquals(MediaTime.canToggle(actions, state),
+                        MediaTime.toggleCommand(actions, state) != MediaTime.TOGGLE_NONE);
+            }
+        }
+    }
+
     @Test public void constantsMatchPlaybackState() {
         // Values of android.media.session.PlaybackState (public, stable API).
         assertEquals(3, MediaTime.STATE_PLAYING);

@@ -86,6 +86,19 @@ final class MediaTime {
         return advancing(state) || state == STATE_BUFFERING ? can(actions, ACTION_PAUSE) : can(actions, ACTION_PLAY);
     }
 
+    static final int TOGGLE_NONE = 0, TOGGLE_PLAY = 1, TOGGLE_PAUSE = 2, TOGGLE_MEDIA_KEY = 3;
+
+    /**
+     * What the play/pause button sends now: the specific PLAY or PAUSE when the session offers it, else the
+     * PLAY_PAUSE media key when the session only offers that toggle, else nothing (the button is hidden).
+     */
+    static int toggleCommand(long actions, int state) {
+        boolean pauseNow = advancing(state) || state == STATE_BUFFERING;
+        long specific = pauseNow ? ACTION_PAUSE : ACTION_PLAY;
+        if (can(actions, specific)) return pauseNow ? TOGGLE_PAUSE : TOGGLE_PLAY;
+        return can(actions, ACTION_PLAY_PAUSE) ? TOGGLE_MEDIA_KEY : TOGGLE_NONE;
+    }
+
     /** Worth showing on Home: playing, buffering or paused, with a title. */
     static boolean showable(int state, String title) {
         return title != null && !title.trim().isEmpty()

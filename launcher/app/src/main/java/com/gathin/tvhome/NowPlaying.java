@@ -42,6 +42,8 @@ final class NowPlaying {
         float speed;
         /** Display artwork (<= 512 px), and a small blurred copy for the scene; both may be null. */
         Bitmap art, blurredArt;
+        /** This track's art is still being decoded: keep the current scene rather than flashing the wallpaper. */
+        boolean artPending;
 
         long positionNow() {
             return MediaTime.position(state, position, updateTime, speed, SystemClock.elapsedRealtime(), duration);
@@ -64,6 +66,7 @@ final class NowPlaying {
     private String lastArtKey;
     private Bitmap lastArt, lastBlurred;
     private int artGeneration;
+    private boolean artLoading;
 
     NowPlaying(Context ctx, Listener listener) {
         this.ctx = ctx.getApplicationContext();
@@ -223,6 +226,7 @@ final class NowPlaying {
         if (t.artKey.equals(lastArtKey)) {
             t.art = lastArt;
             t.blurredArt = lastBlurred;
+            t.artPending = lastArt == null && artLoading;
             listener.onNowPlaying(t);
             return;
         }
@@ -230,17 +234,20 @@ final class NowPlaying {
         lastArtKey = t.artKey;
         lastArt = null;
         lastBlurred = null;
-        listener.onNowPlaying(t);
-        if (bmp == null && uri == null) return;
+        artLoading = bmp != null || uri != null;
+        t.artPending = artLoading;
         final int gen = ++artGeneration;
+        listener.onNowPlaying(t);
+        if (!artLoading) return;
         final String key = t.artKey;
         worker.execute(() -> {
             Bitmap src = bmp != null ? bmp : load(uri);
-            if (src == null) return;
-            Bitmap shown = scaleDown(src, 512);
-            Bitmap blur = Blur.blurred(src, 48, 3);
+            Bitmap shown = src == null ? null : scaleDown(src, 512);
+            Bitmap blur = src == null ? null : Blur.blurred(src, 48, 3);
             main.post(() -> {
                 if (gen != artGeneration || !key.equals(lastArtKey)) return;
+                // Decoded, or failed for good: either way no longer pending (a failure falls back to no art).
+                artLoading = false;
                 lastArt = shown;
                 lastBlurred = blur;
                 publish();
@@ -308,8 +315,20 @@ final class NowPlaying {
         if (c == null) return;
         PlaybackState s = c.getPlaybackState();
         int st = s != null ? s.getState() : 0;
-        if (MediaTime.advancing(st) || st == MediaTime.STATE_BUFFERING) c.getTransportControls().pause();
-        else c.getTransportControls().play();
+        long actions = s != null ? s.getActions() : 0;
+        switch (MediaTime.toggleCommand(actions, st)) {
+            case MediaTime.TOGGLE_PAUSE: c.getTransportControls().pause(); break;
+            case MediaTime.TOGGLE_PLAY: c.getTransportControls().play(); break;
+            case MediaTime.TOGGLE_MEDIA_KEY:
+                // The session offers only the toggle: send it the media key, as a remote's button would.
+                long now = SystemClock.uptimeMillis();
+                c.dispatchMediaButtonEvent(new android.view.KeyEvent(now, now, android.view.KeyEvent.ACTION_DOWN,
+                        android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 0));
+                c.dispatchMediaButtonEvent(new android.view.KeyEvent(now, now, android.view.KeyEvent.ACTION_UP,
+                        android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, 0));
+                break;
+            default:
+        }
     }
 
     void next() {
