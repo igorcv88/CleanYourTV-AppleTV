@@ -70,7 +70,12 @@ if [ -n "$profile" ]; then
   echo
   echo "A matching profile can disable preinstalled apps: $profile"
   echo 'Read its comments carefully; Chromecast, tuner, HDMI, Ambilight and other features must be preserved.'
-  read -r -p 'Type OPTIMIZAR to apply this debloat profile, or press Enter to skip: ' answer
+  answer=''
+  if [ -t 0 ]; then
+    read -r -p 'Type OPTIMIZAR to apply this debloat profile, or press Enter to skip: ' answer || true
+  else
+    echo 'No interactive terminal. Debloat is skipped; run tools/disable.sh explicitly after review.'
+  fi
   if [ "$answer" = OPTIMIZAR ]; then
     "$ROOT/tools/disable.sh" "$profile"
     echo "Undo optimizations using: TV_HOST=$TV_HOST tools/restore.sh $profile"
