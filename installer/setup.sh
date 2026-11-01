@@ -79,3 +79,4 @@ if [ -n "$profile" ]; then
   fi
 fi
 echo 'Keep this extracted folder and the recovery records under ~/.cleanyourtv for rollback.'
+echo 'After validating the TV, turn ADB debugging OFF and reboot it.'
