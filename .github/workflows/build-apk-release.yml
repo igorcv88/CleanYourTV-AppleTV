@@ -260,8 +260,9 @@ jobs:
           SETUP_SHA: ${{ steps.kit.outputs.checksum }}
         run: |
           set -euo pipefail
+          notes=$'**Download recomendado:** `ScenicGlassTV-*-Setup.zip`. Extraia no computador e leia `README.md` para instalar a Home e aplicar as otimizações CleanYourTV com backup/rollback.\n\nO debloat só é oferecido quando o perfil corresponde exatamente ao firmware da TV e requer confirmação. Um perfil de outro modelo pode comprometer HDMI, Chromecast ou funções do fabricante.\n\n**Alternativa:** use o `.apk` avulso apenas para instalar o launcher, sem otimizações. Os arquivos `.sha256` permitem conferir os downloads.'
           args=(release create "$TAG" "$APK" "$CHECKSUM" "$SETUP_ZIP" "$SETUP_SHA" \
-            --target "$GITHUB_SHA" --title "Scenic Glass TV $VERSION" --generate-notes)
+            --target "$GITHUB_SHA" --title "Scenic Glass TV $VERSION" --generate-notes --notes "$notes")
           if [[ "$PRERELEASE" == true ]]; then
             args+=(--prerelease --latest=false)
           fi
