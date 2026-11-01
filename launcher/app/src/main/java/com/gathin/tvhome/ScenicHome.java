@@ -835,13 +835,7 @@ final class ScenicHome implements NowPlaying.Listener {
         nowTitle.setText(t.title);
         nowArtist.setText(t.artist != null ? t.artist : "");
         nowArtist.setVisibility(t.artist != null ? View.VISIBLE : View.GONE);
-        if (t.art != null) nowArt.setImageBitmap(t.art);
-        else {
-            nowArt.setImageResource(R.drawable.ic_music);
-            nowArt.setScaleType(ImageView.ScaleType.CENTER);
-        }
-        if (t.art != null) nowArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        nowArt.setBackground(t.art != null ? null : new LiquidGlassDrawable(14f, 0x33FFFFFF));
+        setArt(nowArt, t.art, 14f);
         boolean playing = MediaTime.advancing(t.state) || t.state == MediaTime.STATE_BUFFERING;
         int toggleIcon = playing ? R.drawable.ic_pause : R.drawable.ic_play;
         btnToggle.setImageResource(toggleIcon);
@@ -853,19 +847,33 @@ final class ScenicHome implements NowPlaying.Listener {
             bigTitle.setText(t.title);
             bigArtist.setText(t.artist != null ? t.artist : "");
             bigAlbum.setText(t.album != null ? t.album : "");
-            if (t.art != null) bigArt.setImageBitmap(t.art);
+            setArt(bigArt, t.art, 24f);
             bigToggle.setImageResource(toggleIcon);
             setVisible(bigPrev, btnPrev.getVisibility() == View.VISIBLE);
             setVisible(bigNext, btnNext.getVisibility() == View.VISIBLE);
             setVisible(bigToggle, btnToggle.getVisibility() == View.VISIBLE);
         }
         updateProgress();
-        if (!appsShown && (old == null || nowGroup.getVisibility() != View.VISIBLE)) {
+        // Not while Listen is open: the compact group is hidden under it on purpose.
+        if (!appsShown && !listening && (old == null || nowGroup.getVisibility() != View.VISIBLE)) {
             fade(nowGroup, true, 0);
             fade(ribbon, true, 0);
         }
         if (old == null || t.blurredArt != (old.blurredArt)) showWash(t.blurredArt);
         startTick();
+    }
+
+    /** The track's cover, or (no art yet, or none at all) the music glyph on glass: never the previous cover. */
+    private void setArt(ImageView view, Bitmap art, float radiusDp) {
+        if (art != null) {
+            view.setImageBitmap(art);
+            view.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            view.setBackground(null);
+        } else {
+            view.setImageResource(R.drawable.ic_music);
+            view.setScaleType(ImageView.ScaleType.CENTER);
+            view.setBackground(new LiquidGlassDrawable(radiusDp, 0x33FFFFFF));
+        }
     }
 
     private void setVisible(View v, boolean on) {
@@ -999,10 +1007,7 @@ final class ScenicHome implements NowPlaying.Listener {
         if (track == null || listening) return;
         if (listenLayer == null) buildListen();
         onNowPlaying(track);   // fills the big view
-        if (track.art != null) bigArt.setImageBitmap(track.art);
-        else bigArt.setImageResource(R.drawable.ic_music);
-        bigArt.setScaleType(track.art != null ? ImageView.ScaleType.CENTER_CROP : ImageView.ScaleType.CENTER);
-        bigArt.setBackground(track.art != null ? null : new LiquidGlassDrawable(24f, 0x33FFFFFF));
+        setArt(bigArt, track.art, 24f);
         focusMemory.push("listen", a.getCurrentFocus());
         listening = true;
         listenLayer.setAlpha(0f);   // until the first frame of the animation places the art over the small one
@@ -1506,7 +1511,11 @@ final class ScenicHome implements NowPlaying.Listener {
         boolean aerials = !AerialBackdrop.catalog(a).isEmpty();
         screenContent.addView(choiceRow("Aerial video", aerials ? null : "None on this TV", "auto".equals(choice) && aerials, () -> {
             if (!aerials) { closeScreenNow(); a.showAerialDownloads(); return; }
+            boolean wasStill = !"auto".equals(choice);
             p.edit().putString(WALLPAPER_KEY, "auto").apply();
+            // From the built-in still there is no aerial attached: restart Home so the chosen one plays (the
+            // picker only restarts when the file changes). Already on aerials: pick another one.
+            if (wasStill) { a.recreate(); return; }
             closeScreenNow();
             a.showAerialPicker();
         }));
