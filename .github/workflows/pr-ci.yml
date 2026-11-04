@@ -50,7 +50,6 @@ jobs:
         run: bash ./gradlew --no-daemon assembleRelease
       - name: Check launcher APK size (16 MiB maximum)
         run: |
-          find launcher/app/build/outputs/apk/release -name '*.apk' -type f -print0 |
-            while IFS= read -r -d '' apk; do
-              test "$(stat -c %s "$apk")" -le 16777216 || exit 1
-            done
+          apk="$(find launcher/app/build/outputs/apk/release -name '*.apk' -type f -print -quit)"
+          test -n "$apk"
+          test "$(stat -c %s "$apk")" -le 16777216
