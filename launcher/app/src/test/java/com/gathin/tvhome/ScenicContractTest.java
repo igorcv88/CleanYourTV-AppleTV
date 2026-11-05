@@ -179,4 +179,41 @@ public class ScenicContractTest {
             }
         }
     }
+
+    // ---- the frost follows the aerial, cheaply --------------------------------------------------
+
+    @Test public void aerialFrostIsAContinuousCheapStream() {
+        String aerial = src("AerialBackdrop.java");
+        String sample = body(aerial, "private void sampleGlass()");
+        assertContains("reused copy target", sample, "if (snapshot == null || snapshot.getWidth() != w");
+        assertFalse("no fresh blur bitmap per sample", sample.contains("Blur.blurred("));
+        assertContains("two reused output bitmaps", sample, "glassStream.blur(target, Blur.MOTION_SIDE, Blur.MOTION_RADIUS)");
+        assertContains("copied at twice the frost's size", sample, "2f * Blur.MOTION_SIDE");
+        String done = body(aerial, "private void glassSampled(");
+        assertContains("the next copy follows the last", done, "GLASS_FRAME_MS - took");
+        assertContains("luminance measured off the UI thread", done, "Scene.setStill(frost, lum);");
+    }
+
+    @Test public void focusIsGlassNeverAWhiteFill() {
+        assertFalse("the #22 white focus fill is gone",
+                new File("src/main/res/drawable/scenic_row_bg.xml").exists());
+        assertContains("rows", src("ScenicHome.java"), "SceneGlassDrawable.focusSurface(r, 16f);");
+        String glass = src("SceneGlassDrawable.java");
+        assertContains("focus brightens the frost itself", glass, "scene.setColorFilter(focused ? BODY_FOCUSED : BODY);");
+    }
+
+    @Test public void allAppsFrostsTheAerialButNotTheAlbumWash() {
+        String home = body(src("ScenicHome.java"), "void showApps(boolean show, boolean focusGrid)");
+        assertContains("veil chosen per background", home, "dim.setBackground(washCovering() ? appsShade : appsFrost);");
+    }
+
+    @Test public void controlCenterNeverClipsAFocusedControl() {
+        String cc = src("ControlCenter.java");
+        assertFalse("no clip to the card's outline", cc.contains("card.setClipToOutline(true)"));
+        assertContains("children may lift past their bounds", cc, "card.setClipChildren(false);");
+        // The media platter clipped its focused title to its padding: the lift lost its rounded rim.
+        assertContains("platter lets the title lift", cc, "platter.setClipToPadding(false);");
+        assertTrue("sheet sits below the header's buttons", ControlCenter.TOP_DP >= 96);
+        assertTrue("lift stays inside the 16dp padding", ControlCenter.FOCUS_SCALE <= 1.05f);
+    }
 }

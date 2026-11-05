@@ -5,70 +5,98 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
-import java.util.HashSet;
-import java.util.Set;
-
-/** The ribbon's swells: several independent mounds above the line, never a single sine, never below it. */
+/** The progress line's waves: layered, tall enough to see, lively, spread over the played span, never past it. */
 public class RibbonSwellsTest {
-    private final RibbonSwells.Swell s = new RibbonSwells.Swell();
+    private static float maxOver(int layer, long t) {
+        float max = 0f;
+        for (int i = 0; i <= 200; i++) max = Math.max(max, RibbonSwells.height(layer, i / 200f, t, 1f, 1f));
+        return max;
+    }
 
-    @Test public void swellsStayAboveTheLineAndInsideThePlayedSpan() {
-        for (long t = 0; t < 60_000; t += 37) {
-            for (int i = 0; i < RibbonSwells.COUNT; i++) {
-                RibbonSwells.at(i, t, 1f, s);
-                assertTrue(s.heightDp >= 0f);
-                assertTrue(s.heightDp <= RibbonSwells.MAX_HEIGHT_DP + 1e-4f);
-                assertTrue(s.centre >= 0f && s.centre <= 1f);
-                assertTrue(s.widthDp >= RibbonSwells.MIN_WIDTH_DP && s.widthDp <= RibbonSwells.MAX_WIDTH_DP);
-                assertTrue(s.colour >= 0 && s.colour < 3);
+    @Test public void wavesStayAboveTheLineAndUnderTheirCeiling() {
+        for (long t = 0; t < 30_000; t += 97) {
+            for (int layer = 0; layer < RibbonSwells.LAYERS; layer++) {
+                for (int i = 0; i <= 50; i++) {
+                    float h = RibbonSwells.height(layer, i / 50f, t, 1f, 1f);
+                    assertTrue(h >= 0f);
+                    assertTrue(h <= RibbonSwells.MAX_HEIGHT_DP + 1e-4f);
+                }
             }
         }
     }
 
-    @Test public void theyAreIndependentNotOneContinuousWave() {
-        // At one instant, the swells sit at different places with different heights.
-        Set<Integer> places = new HashSet<>(), heights = new HashSet<>();
-        for (int i = 0; i < RibbonSwells.COUNT; i++) {
-            RibbonSwells.at(i, 12_345, 1f, s);
-            places.add(Math.round(s.centre * 100));
-            heights.add(Math.round(s.heightDp * 10));
+    @Test public void theyRiseFromTheLineAndSinkBeforeThePlayhead() {
+        for (long t = 0; t < 10_000; t += 333) {
+            for (int layer = 0; layer < RibbonSwells.LAYERS; layer++) {
+                assertEquals(0f, RibbonSwells.height(layer, 0f, t, 1f, 1f), 0f);
+                assertEquals(0f, RibbonSwells.height(layer, 1f, t, 1f, 1f), 0f);
+                assertTrue(RibbonSwells.height(layer, 0.995f, t, 1f, 1f) < 0.05f * RibbonSwells.MAX_HEIGHT_DP);
+            }
         }
-        assertTrue(places.size() >= 4);
-        assertTrue(heights.size() >= 3);
     }
 
-    @Test public void eachSwellIsBornFromAndMeltsIntoTheLine() {
-        // Envelope sin^2: zero at the start of each life, so nothing pops into view.
-        RibbonSwells.at(0, 0, 1f, s);
-        assertEquals(0f, s.heightDp, 1e-4f);
-        RibbonSwells.at(0, 3400, 1f, s);
-        assertEquals(0f, s.heightDp, 1e-3f);
-        RibbonSwells.at(0, 1700, 1f, s);
-        assertTrue(s.heightDp > 0.3f * RibbonSwells.MAX_HEIGHT_DP);
+    @Test public void theyAreTallEnoughToSee() {
+        // The first version peaked at 9dp and mostly sat near 3dp: invisible from the sofa.
+        for (long t = 0; t < 20_000; t += 500) {
+            assertTrue("back layer at " + t, maxOver(0, t) > 0.45f * RibbonSwells.MAX_HEIGHT_DP);
+            assertTrue("front layer at " + t, maxOver(RibbonSwells.LAYERS - 1, t) > 0.2f * RibbonSwells.MAX_HEIGHT_DP);
+        }
+        assertTrue(RibbonSwells.MAX_HEIGHT_DP >= 20f);
     }
 
-    @Test public void pausedOrReducedMotionMeansNoSwells() {
-        for (int i = 0; i < RibbonSwells.COUNT; i++) {
-            RibbonSwells.at(i, 9_000, 0f, s);
-            assertEquals(0f, s.heightDp, 0f);
-            assertEquals(0f, s.envelope, 0f);
+    @Test public void theyCoverThePlayedSpanNotOneCorner() {
+        // At any instant some layer stands at least a quarter high over most of the played span.
+        for (long t = 0; t < 20_000; t += 700) {
+            int covered = 0;
+            for (int i = 1; i < 100; i++) {
+                float u = i / 100f, best = 0f;
+                for (int layer = 0; layer < RibbonSwells.LAYERS; layer++) {
+                    best = Math.max(best, RibbonSwells.height(layer, u, t, 1f, 1f));
+                }
+                if (best > 0.25f * RibbonSwells.MAX_HEIGHT_DP) covered++;
+            }
+            assertTrue("covered " + covered + "% at " + t, covered >= 60);
         }
+    }
+
+    @Test public void theyMoveBrisklyNotOverSeconds() {
+        // Within a quarter of a second the crest of the front layer changes visibly.
+        float a = maxOver(1, 10_000), b = maxOver(1, 10_250);
+        float change = 0f;
+        for (int i = 1; i < 100; i++) {
+            change = Math.max(change, Math.abs(RibbonSwells.height(1, i / 100f, 10_000, 1f, 1f)
+                    - RibbonSwells.height(1, i / 100f, 10_250, 1f, 1f)));
+        }
+        assertTrue("a=" + a + " b=" + b + " change=" + change, change > 0.08f * RibbonSwells.MAX_HEIGHT_DP);
+    }
+
+    @Test public void layersAreIndependent() {
+        int differ = 0;
+        for (int i = 1; i < 20; i++) {
+            float u = i / 20f;
+            if (Math.abs(RibbonSwells.height(1, u, 7_000, 1f, 1f) - RibbonSwells.height(2, u, 7_000, 1f, 1f)) > 1f) differ++;
+        }
+        assertTrue(differ >= 8);
+    }
+
+    @Test public void pausedReducedMotionOrATinySpanMeansNoWaves() {
+        for (int layer = 0; layer < RibbonSwells.LAYERS; layer++) {
+            assertEquals(0f, RibbonSwells.height(layer, 0.5f, 9_000, 0f, 1f), 0f);
+            assertEquals(0f, RibbonSwells.height(layer, 0.5f, 9_000, 1f, 0f), 0f);
+        }
+        assertEquals(0f, RibbonSwells.room(8f), 0f);
+        assertEquals(1f, RibbonSwells.room(RibbonSwells.FULL_SPAN_DP * 2), 0f);
+        assertTrue(RibbonSwells.room(RibbonSwells.FULL_SPAN_DP / 2) < 1f);
+    }
+
+    @Test public void overlappingSwellsMergeIntoARoundedCrest() {
+        assertEquals(0.5f, RibbonSwells.soft(0.5f), 0f);
+        assertTrue(RibbonSwells.soft(3f) <= 1f);
+        assertTrue(RibbonSwells.soft(1.2f) > RibbonSwells.soft(1f));
     }
 
     @Test public void motionIsDeterministic() {
-        RibbonSwells.Swell other = new RibbonSwells.Swell();
-        RibbonSwells.at(3, 44_444, 0.7f, s);
-        RibbonSwells.at(3, 44_444, 0.7f, other);
-        assertEquals(s.centre, other.centre, 0f);
-        assertEquals(s.heightDp, other.heightDp, 0f);
-    }
-
-    @Test public void aSwellReappearsElsewhereEachCycle() {
-        Set<Integer> places = new HashSet<>();
-        for (int cycle = 0; cycle < 8; cycle++) {
-            RibbonSwells.at(1, cycle * 4100L + 2050L - 1370L + 4100L, 1f, s);
-            places.add(Math.round(s.centre * 50));
-        }
-        assertTrue(places.size() >= 5);
+        assertEquals(RibbonSwells.height(2, 0.4f, 44_444, 0.7f, 0.9f),
+                RibbonSwells.height(2, 0.4f, 44_444, 0.7f, 0.9f), 0f);
     }
 }

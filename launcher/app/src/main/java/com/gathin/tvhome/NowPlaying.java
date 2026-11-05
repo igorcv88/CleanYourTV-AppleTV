@@ -262,7 +262,8 @@ final class NowPlaying {
             // At 48px a full-screen cover was just a colour smear. Keep enough of the
             // sleeve visible to recognise it, but retain a separately frosted glass sample.
             Bitmap blur = src == null ? null : Blur.blurred(src, 384, 2);
-            Bitmap glass = src == null ? null : Blur.blurred(src, 64, 4);
+            // The glass over the wash: a step softer than the wash itself (which is already 384 px), never a smear.
+            Bitmap glass = src == null ? null : Blur.blurred(src, 192, 5);
             main.post(() -> {
                 if (gen != artGeneration || !key.equals(lastArtKey)) return;
                 // Decoded, or failed for good: either way no longer pending (a failure falls back to no art).

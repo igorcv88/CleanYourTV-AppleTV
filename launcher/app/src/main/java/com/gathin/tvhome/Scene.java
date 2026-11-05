@@ -10,9 +10,9 @@ import java.util.List;
 
 /**
  * What lies behind Scenic Home's glass, as one small pre-blurred bitmap in the screen's centre-crop model
- * ({@link SceneCrop}): the still wallpaper, or the album art while music plays. Null over a moving aerial,
- * where glass falls back to tint and rim only (no live capture of video). Glass surfaces register and are
- * invalidated only when the scene changes.
+ * ({@link SceneCrop}): the still wallpaper, a recent frame of the aerial (refreshed a few times a second by
+ * {@link AerialBackdrop}), or the album art while music plays. Glass surfaces register and are invalidated
+ * only when the scene changes.
  */
 final class Scene {
     private Scene() { }
@@ -32,8 +32,13 @@ final class Scene {
     }
 
     static void setStill(Bitmap blurred) {
-        if (still != blurred) stillLum = measure(blurred);
+        setStill(blurred, blurred == still ? stillLum : measure(blurred));
+    }
+
+    /** A sample whose luminance was measured where it was made (the aerial's worker): nothing scanned here. */
+    static void setStill(Bitmap blurred, float luminance) {
         still = blurred;
+        stillLum = luminance;
         invalidateAll();
     }
 

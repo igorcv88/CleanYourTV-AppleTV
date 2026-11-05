@@ -14,13 +14,15 @@ import android.view.KeyEvent;
 import android.view.View;
 
 /**
- * Glass Current: the thin lit progress ribbon above the dock. A level stroke (3.2dp), brighter over the elapsed
- * part, with the elapsed time at its left end and the remaining time at its right end.
+ * Glass Current: the progress line above the dock. A straight 4dp line, lit in the cover's colours over the
+ * elapsed part, a round knob at the playhead, the elapsed time at its left end and the remaining time at its
+ * right end.
  *
- * <p>While music plays, small luminous swells ({@link RibbonSwells}) rise from the elapsed part of the line,
- * in a palette from the cover ({@link ArtPalette}), and sink back. They are procedural decoration, not audio
- * analysis. The line itself is always a straight horizontal segment: the swells are drawn underneath it and
- * never move it, the time labels or the knob. Reduced motion turns the swells off.
+ * <p>While music plays, waves rise from the elapsed part of the line, after Samsung Music's player: filled,
+ * overlapping translucent layers ({@link RibbonSwells}), a pale neutral one behind and the cover's palette in
+ * front ({@link ArtPalette}), each a range of swells that pulse at their own tempo and drift along the line.
+ * They are procedural decoration, not audio analysis. The line itself is always a straight horizontal segment:
+ * the waves sit on it and never move it, the time labels or the knob. Reduced motion turns them off.
  *
  * <p>Focusable only when the session supports seeking: then Left/Right seek 15 s per press and are consumed;
  * Up/Down pass through. Unfocused, it never touches D-pad keys.
@@ -30,8 +32,26 @@ final class GlassCurrentView extends View {
         void onSeekBy(long deltaMs);
     }
 
-    /** 20 Hz is smooth for these slow swells and leaves the GPU almost idle; nothing redraws while paused. */
-    private static final long FRAME_MS = 50L;
+    /**
+     * The waves step at a steady 30 Hz on every other vsync: the full-screen glass costs this TV's GPU about
+     * 19 ms a frame, so 60 Hz drifted between 40 and 60 and stuttered, and a fixed delay after each draw beat
+     * against the display. Motion times come from the vsync, not from when the draw happened to run.
+     */
+    private static final long FRAME_MS = 33L;
+    private long nextFrameAt;
+    private final Runnable tick = new Runnable() {
+        @Override public void run() {
+            long now = android.view.animation.AnimationUtils.currentAnimationTimeMillis();
+            if (now + 4L >= nextFrameAt) {
+                nextFrameAt = now - nextFrameAt > FRAME_MS ? now + FRAME_MS : nextFrameAt + FRAME_MS;
+                invalidate();
+            } else {
+                postOnAnimation(this);
+            }
+        }
+    };
+    /** Points per layer outline: one every few dp, capped. */
+    private static final int MAX_POINTS = 72;
     private static final long PALETTE_FADE_MS = 900L, LEVEL_FADE_MS = 700L;
     private static final int GRADIENT_STEPS = 6;
 
@@ -40,6 +60,8 @@ final class GlassCurrentView extends View {
     private final Paint glow = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint rest = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint knob = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint knobRing = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint knobGlow = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint swellPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint label = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
@@ -47,9 +69,12 @@ final class GlassCurrentView extends View {
     private final Path swellPath = new Path();
     private final PathMeasure measure = new PathMeasure();
     private final float[] pos = new float[2];
-    private final RibbonSwells.Swell swell = new RibbonSwells.Swell();
+    private final RibbonSwells.Frame waves = new RibbonSwells.Frame();
     private final int[] samples = new int[64];
     private float fraction = -1f;
+    /** While the track advances: its live position, read every frame so the knob glides instead of stepping. */
+    private java.util.function.LongSupplier livePosition;
+    private long liveDuration;
     private String elapsed = "", remaining = "";
     private boolean seekable;
     private SeekListener seekListener;
@@ -66,22 +91,25 @@ final class GlassCurrentView extends View {
 
     /** Overall swell presence 0..1, eased toward 1 while playing and 0 while paused. */
     private float level;
+    /** 0: the waves in shades of white (Home), 1: in the cover's colours (Listen). Follows the Listen motion. */
+    private float colour;
     private long levelAt;
 
     GlassCurrentView(Context ctx) {
         super(ctx);
         density = ctx.getResources().getDisplayMetrics().density;
-        float stroke = 3.2f * density;
+        float stroke = 4f * density;
         for (Paint p : new Paint[]{lit, glow, rest}) {
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeCap(Paint.Cap.ROUND);
             p.setStrokeWidth(stroke);
         }
         lit.setColor(0xF2FFFFFF);
-        glow.setStrokeWidth(stroke * 2.6f);
-        glow.setColor(0x24FFFFFF);
-        rest.setColor(0x47FFFFFF);
+        glow.setStrokeWidth(stroke * 2.4f);
+        glow.setColor(0x30FFFFFF);
+        rest.setColor(0x52FFFFFF);
         knob.setColor(0xFFFFFFFF);
+        knobRing.setColor(0xFFFFFFFF);
         swellPaint.setStyle(Paint.Style.FILL);
         label.setColor(0xD9F5F6F8);
         label.setTextSize(13f * ctx.getResources().getDisplayMetrics().scaledDensity);
@@ -128,6 +156,12 @@ final class GlassCurrentView extends View {
         if (!animateWave) paletteAt -= PALETTE_FADE_MS;   // reduced motion: switch at once
         gradientStep = -1;
         invalidate();
+    }
+
+    /** The playing track's position source (null when paused or unknown); the labels still come per second. */
+    void setLivePosition(java.util.function.LongSupplier position, long duration) {
+        livePosition = duration > 0 ? position : null;
+        liveDuration = duration;
     }
 
     /** fraction -1 = unknown duration (subdued line, no remaining time). */
@@ -192,12 +226,14 @@ final class GlassCurrentView extends View {
         int step = Math.round(t * GRADIENT_STEPS);
         if (step != gradientStep) {
             gradientStep = step;
-            // Mostly white, warming to the cover's colours toward the played end: a hint, not a rainbow.
+            // The played line in the cover's colours, light enough to read as lit, as Samsung's player does.
             lit.setShader(new LinearGradient(pathStart, 0f, pathEnd, 0f,
-                    new int[]{0xFFFFFFFF, ArtPalette.toward(palette[0], 0xFFFFFFFF, 0.55f),
-                            ArtPalette.toward(palette[1], 0xFFFFFFFF, 0.5f)},
-                    new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
-            glow.setColor((palette[0] & 0x00FFFFFF) | 0x26000000);
+                    new int[]{ArtPalette.toward(palette[1], 0xFFFFFFFF, 0.35f),
+                            ArtPalette.toward(palette[0], 0xFFFFFFFF, 0.2f)},
+                    null, Shader.TileMode.CLAMP));
+            glow.setColor((palette[0] & 0x00FFFFFF) | 0x38000000);
+            knobRing.setColor(ArtPalette.toward(palette[0], 0xFFFFFFFF, 0.15f));
+            knobGlow.setColor((palette[0] & 0x00FFFFFF) | 0x47000000);
         }
         return t < 1f;
     }
@@ -211,37 +247,62 @@ final class GlassCurrentView extends View {
         return level != target;
     }
 
-    /** The swells, under the line, inside the elapsed span [from, to]. */
+    /** The waves, on the line, inside the elapsed span [from, to]: back layer first. */
     private void drawSwells(Canvas c, float from, float to, float cy, long now) {
-        if (level <= 0f || to - from < 12f * density) return;
         float span = to - from;
-        // A short elapsed span gets proportionally smaller swells, so they never spill past the played part.
-        float room = Math.min(1f, span / (120f * density));
-        for (int i = 0; i < RibbonSwells.COUNT; i++) {
-            RibbonSwells.at(i, now, level, swell);
-            if (swell.envelope <= 0.01f) continue;
-            float half = Math.min(swell.widthDp * density, span) / 2f;
-            float x = from + half + (span - 2f * half) * swell.centre;
-            float height = swell.heightDp * density * room;
-            int colour = palette[swell.colour];
-            bell(x, cy, half, height);
-            swellPaint.setColor((colour & 0x00FFFFFF) | (Math.round(0x3A * swell.envelope) << 24));
-            c.drawPath(swellPath, swellPaint);
-            // A brighter, narrower core: light that seems to come from the line itself.
-            bell(x, cy, half * 0.55f, height * 0.62f);
-            swellPaint.setColor((ArtPalette.toward(colour, 0xFFFFFFFF, 0.25f) & 0x00FFFFFF)
-                    | (Math.round(0x4C * swell.envelope) << 24));
+        float room = RibbonSwells.room(span / density);
+        if (level <= 0f || room <= 0f) return;
+        RibbonSwells.frame(now, waves);
+        int points = Math.max(12, Math.min(MAX_POINTS, Math.round(span / (5f * density))));
+        for (int layer = 0; layer < RibbonSwells.LAYERS; layer++) {
+            swellPath.rewind();
+            swellPath.moveTo(from, cy);
+            // A smooth outline: each sample is a control point, the curve passes through the midpoints.
+            float px = from, py = cy;
+            for (int i = 1; i <= points; i++) {
+                float u = i / (float) points;
+                float x = from + span * u;
+                float y = i == points ? cy : cy - RibbonSwells.height(waves, layer, u, level, room) * density;
+                swellPath.quadTo(px, py, (px + x) / 2f, (py + y) / 2f);
+                px = x;
+                py = y;
+            }
+            swellPath.lineTo(to, cy);
+            swellPath.close();
+            swellPaint.setColor(layerColour(layer));
             c.drawPath(swellPath, swellPaint);
         }
     }
 
-    /** A smooth mound on the baseline: zero slope where it meets the line, rounded at its top. */
-    private void bell(float x, float cy, float half, float height) {
-        swellPath.reset();
-        swellPath.moveTo(x - half, cy);
-        swellPath.cubicTo(x - half * 0.45f, cy, x - half * 0.38f, cy - height, x, cy - height);
-        swellPath.cubicTo(x + half * 0.38f, cy - height, x + half * 0.45f, cy, x + half, cy);
-        swellPath.close();
+    /**
+     * How much of the cover's colour the waves carry: none on Home, where they sit quietly over the scenery as
+     * shades of white glass, all of it in Listen. Set every frame of the Listen transition.
+     */
+    void setColour(float t) {
+        float next = Math.max(0f, Math.min(1f, t));
+        if (next == colour) return;
+        colour = next;
+        invalidate();
+    }
+
+    /** White glass on Home: four translucent whites, faint behind, brighter in front where they overlap. */
+    private static final int[] WHITE_LAYERS = {0x2EFFFFFF, 0x47FFFFFF, 0x3DFFFFFF, 0x57FFFFFF};
+
+    private int layerColour(int layer) {
+        int white = WHITE_LAYERS[layer];
+        if (colour <= 0f) return white;
+        int tinted = tintedLayer(layer);
+        return colour >= 1f ? tinted : ArtPalette.lerp(white, tinted, colour);
+    }
+
+    /** Back to front: a pale haze, the cover's main colour, its second, then a light tint of the third. */
+    private int tintedLayer(int layer) {
+        switch (layer) {
+            case 0: return 0x52FFFFFF;
+            case 1: return (palette[0] & 0x00FFFFFF) | 0x9E000000;
+            case 2: return (ArtPalette.toward(palette[1], 0xFFFFFFFF, 0.15f) & 0x00FFFFFF) | 0x85000000;
+            default: return (ArtPalette.toward(palette[2], 0xFFFFFFFF, 0.4f) & 0x00FFFFFF) | 0x8C000000;
+        }
     }
 
     @Override
@@ -249,7 +310,7 @@ final class GlassCurrentView extends View {
         int w = getWidth(), h = getHeight();
         if (w <= 0 || h <= 0) return;
         if (pathW != w) buildPath(w, h);
-        long now = SystemClock.uptimeMillis();
+        long now = android.view.animation.AnimationUtils.currentAnimationTimeMillis();
         boolean fading = updatePalette(now);
         boolean easing = updateLevel(now);
         boolean focused = isFocused();
@@ -259,6 +320,10 @@ final class GlassCurrentView extends View {
         c.drawText(elapsed, pathStart - 14f * density - label.measureText(elapsed), base, label);
         if (!remaining.isEmpty()) c.drawText(remaining, pathEnd + 14f * density, base, label);
         float len = measure.getLength();
+        java.util.function.LongSupplier live = livePosition;
+        if (live != null && fraction >= 0f) {
+            fraction = Math.max(0f, Math.min(1f, live.getAsLong() / (float) liveDuration));
+        }
         if (fraction < 0f) {
             drawSwells(c, pathStart, pathEnd, cy, now);
             c.drawPath(path, rest);
@@ -272,13 +337,18 @@ final class GlassCurrentView extends View {
             measure.getSegment(0, at, seg, true);
             c.drawPath(seg, glow);
             c.drawPath(seg, lit);
-            if (focused) {
-                measure.getPosTan(at, pos, null);
-                c.drawCircle(pos[0], pos[1], 6f * density, knob);
-            }
+            // The knob: always there, as Samsung's; larger with a halo while focused for seeking.
+            measure.getPosTan(at, pos, null);
+            float r = (focused ? 9f : 7f) * density;
+            if (focused || level > 0f) c.drawCircle(pos[0], pos[1], r + 6f * density, knobGlow);
+            c.drawCircle(pos[0], pos[1], r, knobRing);
+            c.drawCircle(pos[0], pos[1], r - 2.5f * density, knob);
         }
         // Frames only while something moves and Home is visible; paused and reduced motion stay still.
         boolean moving = level > 0f || easing || fading;
-        if (moving && isShown()) postInvalidateDelayed(FRAME_MS);
+        if (moving && isShown()) {
+            removeCallbacks(tick);
+            postOnAnimation(tick);
+        }
     }
 }

@@ -5,7 +5,7 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
-/** The shared glass material: translucent, adaptive to the scene, never milky or nearly opaque. */
+/** The shared glass material: a real, light frost; adaptive to the scene; never milky, never a white veil. */
 public class GlassToneTest {
     private static int alpha(int argb) {
         return argb >>> 24;
@@ -15,17 +15,45 @@ public class GlassToneTest {
         return GlassTone.luminance(0xFF000000 | (argb & 0xFFFFFF));
     }
 
-    @Test public void noSurfacePaintsTheBlurredSampleAtFullAlpha() {
-        // The old drawable drew the 64-px pre-blur opaque, hiding the scenery under every surface.
-        for (GlassTone.Kind k : GlassTone.Kind.values()) {
-            assertTrue(k + " clear", GlassTone.sampleShare(k, false) < 0.7f);
-            assertTrue(k + " frosted", GlassTone.sampleShare(k, true) <= 0.85f);
+    @Test public void glassDrawsALightFrostAlmostOpaqueSoItReallyBlurs() {
+        // A faint share of the frost let the sharp UI and video show straight through: "no blur at all".
+        for (GlassTone.Kind k : new GlassTone.Kind[]{GlassTone.Kind.CHROME, GlassTone.Kind.PANEL,
+                GlassTone.Kind.CONTROL, GlassTone.Kind.INSET}) {
+            assertTrue(k + " clear", GlassTone.sampleShare(k, false) >= 0.85f);
+            assertTrue(k + " frosted", GlassTone.sampleShare(k, true) <= 1f);
         }
-        assertEquals(0f, GlassTone.sampleShare(GlassTone.Kind.INSET, true), 0f);
+        assertEquals(1f, GlassTone.sampleShare(GlassTone.Kind.BACKDROP, false), 0f);
+    }
+
+    @Test public void theFrostIsDiffuseButNotASmear() {
+        // ~90 px (the old 96 px / radius 4 sample) was milk; ~15-28 px still showed every terrace step and pixel.
+        float still = Blur.screenSigma(Blur.GLASS_SIDE, Blur.GLASS_RADIUS, 3, 1920);
+        float motion = Blur.screenSigma(Blur.MOTION_SIDE, Blur.MOTION_RADIUS, 3, 1920);
+        assertTrue("still " + still, still >= 40f && still <= 70f);
+        assertTrue("motion " + motion, motion >= 40f && motion <= 70f);
+        assertTrue("still and moving glass match", Math.abs(still - motion) < 0.25f * still);
+        // Each sample pixel stretched over the screen stays well inside the blur, so no block ever shows.
+        assertTrue(1920f / Blur.MOTION_SIDE < still / 2f);
+    }
+
+    @Test public void focusBrightensTheGlassWithoutAWhiteVeil() {
+        for (GlassTone.Kind k : GlassTone.Kind.values()) {
+            for (float l = 0f; l <= 1f; l += 0.1f) {
+                int rest = GlassTone.tint(k, l, false, false), focus = GlassTone.tint(k, l, true, false);
+                assertTrue(k + " " + l, alpha(focus) <= alpha(rest) + 0x10);
+            }
+        }
+    }
+
+    @Test public void theLensBandIsAThinRimNotAFrame() {
+        assertTrue(GlassTone.lensBandDp(400f) <= 6f);
+        assertTrue(GlassTone.lensBandDp(10f) >= 2.5f);
+        assertTrue(GlassTone.LENS_MAGNIFY > 1f && GlassTone.LENS_MAGNIFY < 1.2f);
     }
 
     @Test public void brightScenesGetASmokedVeilDarkScenesAFaintLift() {
-        for (GlassTone.Kind k : new GlassTone.Kind[]{GlassTone.Kind.CHROME, GlassTone.Kind.PANEL, GlassTone.Kind.CONTROL}) {
+        for (GlassTone.Kind k : new GlassTone.Kind[]{GlassTone.Kind.CHROME, GlassTone.Kind.PANEL, GlassTone.Kind.CONTROL,
+                GlassTone.Kind.BACKDROP}) {
             int overBright = GlassTone.tint(k, 0.9f, false, false);
             int overDark = GlassTone.tint(k, 0.1f, false, false);
             assertTrue(k + ": more material over a bright scene", alpha(overBright) > alpha(overDark));
