@@ -19,11 +19,11 @@ final class GlassTone {
     /** What a surface is for. Larger surfaces carry more material; controls stay lighter. */
     enum Kind {
         /** The dock: wide, low, holds coloured cards. */
-        CHROME(0.97f, 0x06, 0x2C, 0.28f, true),
+        CHROME(0.97f, 0x00, 0x0C, 0.28f, true),
         /** Text-bearing panels (Settings, Control Center, menus, secondary screens): hide what is behind. */
         PANEL(0.98f, 0x12, 0x4C, 0.34f, true),
         /** Round buttons and capsules sitting directly on the scene. */
-        CONTROL(0.97f, 0x04, 0x2A, 0.22f, true),
+        CONTROL(0.97f, 0x00, 0x0C, 0.22f, true),
         /**
          * Controls inside a panel (Control Center capsules, platters): the same frost again, clear, with its own
          * lens. Frost of the same scene on frost stays glass; a white lift made them milky.
@@ -98,20 +98,15 @@ final class GlassTone {
      * @param frosted  the user's "Frosted" glass choice: more material, for very busy scenes
      */
     static int tint(Kind kind, float lum, boolean focused, boolean frosted) {
-        if (kind == Kind.INSET) {
-            int a = focused ? 0x0C : 0x08;
-            return (a << 24) | 0xFFFFFF;
-        }
+        // Inset glass (capsules, platters, focused rows) is the frost alone: any white tint read as milk.
+        if (kind == Kind.INSET) return 0;
         float l = lum < 0f ? 0.5f : Math.max(0f, Math.min(1f, lum));
         float bright = smoothstep(0.32f, 0.78f, l);
         float smoke = kind.smokeDark + (kind.smokeBright - kind.smokeDark) * bright;
-        // White lift: present over dark scenes, almost gone over bright ones (where it would be milk).
-        float white = 0x12 - 0x0C * bright;
+        // No white lift anywhere: it read as frost in the middle of clear glass. Panels keep only dark smoke.
+        float white = 0f;
         // Focus brightens the glass itself (SceneGlassDrawable's focus filter), never a white veil over it.
-        if (focused) {
-            white += 0x06;
-            smoke *= 0.6f;
-        }
+        if (focused) smoke *= 0.6f;
         if (frosted) smoke += 0x1C;
         return over(Math.round(white), 0xFFFFFF, Math.round(smoke), SMOKE_RGB);
     }
