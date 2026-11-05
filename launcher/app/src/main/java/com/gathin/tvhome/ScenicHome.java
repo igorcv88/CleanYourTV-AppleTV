@@ -974,16 +974,22 @@ final class ScenicHome implements NowPlaying.Listener {
         }
         // While the new cover decodes, the previous track's wash stays (no flash of the wallpaper between tracks);
         // it changes once the art is ready, or fades out if the track turns out to have none.
-        boolean artworkBackdrop = "art".equals(prefs().getString(MUSIC_BACKDROP_KEY, "aerial"));
-        if (!playing || !artworkBackdrop) {
-            // Never keep a stale album on the background when paused or using an aerial.
-            showWash(null);
-        } else if (!t.artPending) {
-            // An art update can arrive after the song title; the transition is driven by
-            // the resulting bitmap, not by how often the media controller publishes state.
-            showWash(t.blurredArt, t.glassArt);
-        }
+        syncMusicBackdrop();
         startTick();
+    }
+
+    private void syncMusicBackdrop() {
+        NowPlaying.Track current = track;
+        if (current == null) { showWash(null); return; }
+        boolean playing = MediaTime.advancing(current.state) || current.state == MediaTime.STATE_BUFFERING;
+        boolean preferArt = "art".equals(prefs().getString(MUSIC_BACKDROP_KEY, "aerial"));
+        // If a silent video cannot be made, cover the suspended aerial with available artwork
+        // rather than leaving a black frame while preserving Spotify's mixing engine.
+        if (!playing || (!preferArt && !a.aerialNeedsArtworkFallback())) {
+            showWash(null);
+        } else if (!current.artPending) {
+            showWash(current.blurredArt, current.glassArt);
+        }
     }
 
     /** The track's cover, or (no art yet, or none at all) the music glyph on glass: never the previous cover. */
@@ -1047,6 +1053,7 @@ final class ScenicHome implements NowPlaying.Listener {
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             updateProgress();
+            syncMusicBackdrop();
             if (resumed && track != null && MediaTime.advancing(track.state)) handler.postDelayed(this, 1000);
         }
     };
@@ -1803,9 +1810,9 @@ final class ScenicHome implements NowPlaying.Listener {
         screenContent.addView(choiceRow("Lightly blurred album artwork", null,
                 "art".equals(musicBackdrop), () -> chooseMusicBackdrop("art")));
         note("Aerials are played without an audio track when the TV supports video-only playback. "
-                + "If your TV cannot isolate the video, it pauses the aerial during music to protect Spotify's "
-                + "mixing effects. Album artwork uses less video decoding while the music plays; pausing music "
-                + "returns to the selected wallpaper.");
+                + "If the TV cannot isolate the video, album artwork replaces it automatically during music "
+                + "to protect Spotify's mixing effects. You can also choose artwork all the time to reduce "
+                + "video decoding. Pausing music returns to the selected wallpaper.");
         heading("Scenic photo collections");
         String selectedGroup = p.getString(ScenicWallpaperPlayer.GROUP, "all");
         screenContent.addView(choiceRow("All collections · Shuffle", "HD & downloaded 4K",

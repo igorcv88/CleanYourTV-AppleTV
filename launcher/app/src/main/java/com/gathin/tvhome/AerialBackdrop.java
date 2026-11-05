@@ -261,6 +261,11 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
         }
     }
 
+    /** A video with its original audio track cannot coexist with Spotify on this TV. */
+    boolean needsArtworkFallback() {
+        return externalAudioPlaying && preparedFor != null && preparedFor.equals(file) && !preparedVideoOnly;
+    }
+
     void pause() {
         resumed = false;
         cancelPreparation();
