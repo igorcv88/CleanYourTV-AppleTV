@@ -1026,6 +1026,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     List<AppAdapter.Entry> allEntries() { return adapter.entries(); }
     /** The Scenic dock remains backed by every installed app; only its separate grid omits dock favourites. */
     void setScenicDockPackages(List<String> packages) { adapter.setScenicDockPackages(packages); }
+    boolean hasScenicGridItems() { return adapter.appCount() > 0 || adapter.isLibraryAt(0); }
     void playOpenSound() { if (scenicSound != null) scenicSound.onAppOpened(); }
     void playTick() { if (scenicSound != null) scenicSound.onFocusMoved(); }
     void openIntent(Intent intent) { open(intent); }

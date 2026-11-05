@@ -430,7 +430,7 @@ final class ScenicHome implements NowPlaying.Listener {
     /** Focus for Home itself (after a reload or coming back from an app). */
     void focusHome() {
         if (listening || panel.getVisibility() == View.VISIBLE || screen.getVisibility() == View.VISIBLE) return;
-        if (appsShown) { a.focusGridAt(-1); return; }
+        if (appsShown && a.hasScenicGridItems()) { a.focusGridAt(-1); return; }
         focusDock(lastDockPos);
     }
 
@@ -541,7 +541,10 @@ final class ScenicHome implements NowPlaying.Listener {
             @Override public void onAnimationEnd(Animator animation) {
                 if (cancelled) return;
                 if (appsShown) {
-                    if (focusGrid) a.focusGridAt(0);
+                    if (focusGrid) {
+                        if (a.hasScenicGridItems()) a.focusGridAt(0);
+                        else focusDock(lastDockPos);
+                    }
                 } else {
                     gridFrame.setVisibility(View.GONE);
                     dim.setVisibility(View.GONE);
@@ -833,7 +836,7 @@ final class ScenicHome implements NowPlaying.Listener {
                 return true;
             }
             if (row == ROW_DOCK && code == KeyEvent.KEYCODE_DPAD_DOWN) {
-                a.focusGridAt(0);
+                if (a.hasScenicGridItems()) a.focusGridAt(0);
                 return true;
             }
             if (row == ROW_DOCK && code == KeyEvent.KEYCODE_DPAD_UP) {

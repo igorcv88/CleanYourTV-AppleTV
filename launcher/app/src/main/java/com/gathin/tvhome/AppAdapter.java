@@ -248,7 +248,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         this.dockRow = cfg.dockRow;
         this.scenicHome = cfg.scenicHome;
         this.singleRow = cfg.singleRow;
-        this.restNameAlpha = cfg.alwaysShowNames ? 0.75f : 0f;
+        // Every Scenic app tile keeps its label: no row inside its grid is a dock row.
+        this.restNameAlpha = cfg.scenicHome || cfg.alwaysShowNames ? 0.75f : 0f;
         this.cinematic = cfg.cinematicHome;
         this.launchActions = cfg.launchActions;
         this.iconTiles = new HashSet<>(Arrays.asList(ctx.getResources().getStringArray(R.array.icon_tiles)));

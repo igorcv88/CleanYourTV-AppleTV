@@ -93,7 +93,7 @@ public class ScenicContractTest {
         assertContains("Up from the first row focuses the raised dock", keys,
                 "row == ROW_NONE && a.focusedGridIsFirstRow()) {\n                focusDock(lastDockPos);");
         assertContains("Down from the raised dock returns to the grid", keys,
-                "if (row == ROW_DOCK && code == KeyEvent.KEYCODE_DPAD_DOWN) {\n                a.focusGridAt(0);");
+                "if (row == ROW_DOCK && code == KeyEvent.KEYCODE_DPAD_DOWN) {\n                if (a.hasScenicGridItems()) a.focusGridAt(0);");
         assertContains("Up from the raised dock collapses the sheet", keys,
                 "if (row == ROW_DOCK && code == KeyEvent.KEYCODE_DPAD_UP) {\n                showApps(false, false);");
         String back = body(src("ScenicHome.java"), "boolean onBack()");
@@ -120,6 +120,10 @@ public class ScenicContractTest {
         assertContains("dock retains full installed entries", adapter, "for (Entry e : allItems) if (e.kind == Entry.APP)");
         assertContains("Scenic does not hide names in its first grid row", adapter,
                 "!scenicHome && DockSlots.inDockRow(dockRow, singleRow, position, dockSize)");
+        assertContains("Scenic labels remain visible", adapter,
+                "cfg.scenicHome || cfg.alwaysShowNames ? 0.75f : 0f");
+        assertContains("empty grid leaves focus on the dock", home,
+                "if (a.hasScenicGridItems()) a.focusGridAt(0);\n                        else focusDock(lastDockPos);");
         String activity = src("MainActivity.java");
         assertContains("Scenic grid skips the classic dock's top padding", activity,
                 "if (cfg.scenicHome) {\n                // Scenic's separate dock");
