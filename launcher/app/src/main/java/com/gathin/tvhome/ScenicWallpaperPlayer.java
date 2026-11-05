@@ -145,7 +145,7 @@ final class ScenicWallpaperPlayer {
         loading = true;
         decoder.execute(() -> {
             Bitmap next = decode(item);
-            Bitmap sample = next != null ? Blur.blurred(next, 96, 4) : null;
+            Bitmap sample = next != null ? Blur.glass(next) : null;
             main.post(() -> {
                 loading = false;
                 if (released || !active) return;

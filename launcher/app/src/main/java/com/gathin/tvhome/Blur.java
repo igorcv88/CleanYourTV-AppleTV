@@ -15,6 +15,35 @@ import android.graphics.Rect;
 final class Blur {
     private Blur() { }
 
+    /**
+     * Scenic Glass's frost: 320 px across a 1920 px screen with three radius-8 box passes, a gaussian of about
+     * 50 screen pixels: colour and light come through the glass, detail does not (no terrace steps, no roof
+     * edges), and the 6x stretch back to the screen never shows a pixel. A box pass costs the same at any
+     * radius. The old 96 px / radius 4 sample (~90 px) was a featureless smear that read as milk.
+     */
+    static final int GLASS_SIDE = 320, GLASS_RADIUS = 8;
+
+    /**
+     * The aerial's moving frost, sampled many times a second: 240 px with radius 6, about 52 screen pixels,
+     * matching the still frost. It is copied from the video at twice this size and halved with filtering:
+     * a copy straight at this size point-samples the video, which showed as sharp, pixelated detail.
+     */
+    static final int MOTION_SIDE = 240, MOTION_RADIUS = 6;
+
+    /** The scene sample every glass surface draws: see {@link #GLASS_SIDE}. */
+    static Bitmap glass(Bitmap src) {
+        return blurred(src, GLASS_SIDE, GLASS_RADIUS);
+    }
+
+    /**
+     * Gaussian sigma, in screen pixels, of {@code passes} box passes of {@code radius} on a sample {@code side}
+     * pixels wide, stretched over a screen {@code screenW} wide. For tests and documentation of the frost.
+     */
+    static float screenSigma(int side, int radius, int passes, int screenW) {
+        float d = 2f * radius + 1f;
+        return (float) Math.sqrt(passes * (d * d - 1f) / 12f) * screenW / (float) side;
+    }
+
     /** Downsamples src to fit maxSide (aspect kept) and blurs it; a new bitmap, src untouched. */
     static Bitmap blurred(Bitmap src, int maxSide, int radius) {
         int w = src.getWidth(), h = src.getHeight();
@@ -31,8 +60,12 @@ final class Blur {
 
     /** Three horizontal + vertical box passes of this radius, in place, opaque output. */
     static void boxBlur(int[] px, int w, int h, int radius) {
+        boxBlur(px, new int[px.length], w, h, radius);
+    }
+
+    /** As {@link #boxBlur(int[], int, int, int)} with a caller's scratch buffer of the same length. */
+    static void boxBlur(int[] px, int[] tmp, int w, int h, int radius) {
         if (radius < 1 || w < 1 || h < 1) return;
-        int[] tmp = new int[px.length];
         for (int pass = 0; pass < 3; pass++) {
             boxLine(px, tmp, w, h, radius, true);
             boxLine(tmp, px, w, h, radius, false);
@@ -61,5 +94,56 @@ final class Blur {
 
     private static int index(int line, int i, int w, boolean horizontal) {
         return horizontal ? line * w + i : i * w + line;
+    }
+    /**
+     * Blurs a stream of frames (the aerial's glass samples) without allocating per frame: two output bitmaps
+     * used in turn, so the one on screen is never written while the next is made. One worker thread only.
+     */
+    static final class Stream {
+        private final Bitmap[] out = new Bitmap[2];
+        private final Canvas[] canvas = new Canvas[2];
+        private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
+        private final Rect from = new Rect(), to = new Rect();
+        private int[] px, tmp;
+        private int next;
+        private float luminance = 0.5f;
+
+        /** The blurred frame (one of two bitmaps, alternating); src untouched. */
+        Bitmap blur(Bitmap src, int maxSide, int radius) {
+            int w = src.getWidth(), h = src.getHeight();
+            float s = Math.min(1f, maxSide / (float) Math.max(w, h));
+            int sw = Math.max(2, Math.round(w * s)), sh = Math.max(2, Math.round(h * s));
+            Bitmap dst = out[next];
+            if (dst == null || dst.getWidth() != sw || dst.getHeight() != sh) {
+                dst = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
+                out[next] = dst;
+                canvas[next] = new Canvas(dst);
+                px = new int[sw * sh];
+                tmp = new int[sw * sh];
+            }
+            if (px.length != sw * sh) {
+                px = new int[sw * sh];
+                tmp = new int[sw * sh];
+            }
+            if (sw == w && sh == h) {
+                // Already the frost's size (the aerial copies at it): no scaling pass.
+                src.getPixels(px, 0, sw, 0, 0, sw, sh);
+            } else {
+                from.set(0, 0, w, h);
+                to.set(0, 0, sw, sh);
+                canvas[next].drawBitmap(src, from, to, paint);
+                dst.getPixels(px, 0, sw, 0, 0, sw, sh);
+            }
+            boxBlur(px, tmp, sw, sh, radius);
+            dst.setPixels(px, 0, sw, 0, 0, sw, sh);
+            luminance = GlassTone.meanLuminance(px);
+            next = 1 - next;
+            return dst;
+        }
+
+        /** Mean luminance of the last frame blurred, for the glass tint. */
+        float luminance() {
+            return luminance;
+        }
     }
 }

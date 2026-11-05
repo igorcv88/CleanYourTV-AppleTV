@@ -52,8 +52,16 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
     private SurfaceHolder surface;
     private volatile boolean resumed;
     private boolean dimmed;
-    /** One downsampled frame every 16 seconds, never live GPU blur or a UI-thread pixel loop. */
-    private static final long GLASS_SAMPLE_MS = 16_000L;
+    /**
+     * The glass follows the flight: a small frame (a sixth of the screen, already the frost's size) is copied
+     * and blurred on a worker (Blur.Stream, two reused bitmaps), and the next copy starts as soon as one
+     * is on screen, up to this rate. Never a live GPU blur, a UI-thread pixel loop or an allocation per sample.
+     */
+    // 10 a second: the moving frost reads as continuous, and the copies leave the TV's CPU for the music app
+    // (15 a second took noticeably more and the music app's audio broke up under load).
+    private static final long GLASS_FRAME_MS = 100L;
+    /** After a refused copy (the surface between frames, a seek): try again a little later. */
+    private static final long GLASS_RETRY_MS = 500L;
     private static final ExecutorService GLASS_WORKER = Executors.newSingleThreadExecutor();
     /** Video-only remux copies encoded samples once; it never decodes or re-encodes the wallpaper. */
     private static final ExecutorService VIDEO_WORKER = Executors.newSingleThreadExecutor();
@@ -64,7 +72,15 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
         if (!preparedVideoOnly) preparedFor = null;
         start();
     };
-    private boolean copyInFlight;
+    /** A copy or its blur is under way: the next sample waits for it rather than queueing. */
+    private boolean sampling;
+    private boolean sampleFailureLogged;
+    private long sampleStarted;
+    private int statSamples;
+    private long statTotalMs;
+    private volatile long copyMs, blurMs;
+    private Bitmap snapshot;
+    private final Blur.Stream glassStream = new Blur.Stream();
     private final Runnable refreshGlass = this::sampleGlass;
 
     private static final String PREFS = "aerial_backdrop", CHOSEN = "file", POSITION = "position";
@@ -337,7 +353,7 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
             mp.setOnInfoListener((p, what, extra) -> {
                 if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START && player == p) {
                     cover.animate().alpha(0f).setDuration(700).start();
-                    if (scenic) main.postDelayed(refreshGlass, 900);
+                    if (scenic) main.postDelayed(refreshGlass, 300);
                 }
                 return false;
             });
@@ -379,32 +395,68 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
         release();
     }
 
-    /** Gives the translucent dock/panel a scene-aligned frosted backdrop even over an aerial SurfaceView.
-     * PixelCopy runs asynchronously; no per-frame capture and no blur on the UI thread. */
+    /** Gives every glass surface a scene-aligned, frosted copy of the aerial behind it. PixelCopy is
+     * asynchronous and the blur runs on GLASS_WORKER: nothing heavy on the UI thread, no capture per frame. */
     private void sampleGlass() {
         if (!scenic || !resumed || player == null || surface == null) return;
         main.removeCallbacks(refreshGlass);
-        main.postDelayed(refreshGlass, GLASS_SAMPLE_MS);
-        if (copyInFlight || video.getWidth() == 0 || video.getHeight() == 0) return;
-        final Bitmap snapshot;
+        if (sampling || video.getWidth() == 0 || video.getHeight() == 0) {
+            main.postDelayed(refreshGlass, GLASS_RETRY_MS);
+            return;
+        }
+        // Twice the frost's size: Blur.Stream halves it with filtering (see Blur.MOTION_SIDE).
+        float k = 2f * Blur.MOTION_SIDE / (float) Math.max(video.getWidth(), video.getHeight());
+        int w = Math.max(32, Math.round(video.getWidth() * k)), h = Math.max(18, Math.round(video.getHeight() * k));
+        if (snapshot == null || snapshot.getWidth() != w || snapshot.getHeight() != h) {
+            try {
+                snapshot = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            } catch (OutOfMemoryError ignored) { return; }
+        }
+        final Bitmap target = snapshot;
+        sampling = true;
+        sampleStarted = android.os.SystemClock.uptimeMillis();
         try {
-            snapshot = Bitmap.createBitmap(Math.max(32, video.getWidth() / 4),
-                    Math.max(18, video.getHeight() / 4), Bitmap.Config.ARGB_8888);
-        } catch (OutOfMemoryError ignored) { return; }
-        copyInFlight = true;
-        try {
-            PixelCopy.request(video, snapshot, result -> {
-                copyInFlight = false;
-                if (result != PixelCopy.SUCCESS || !resumed) { snapshot.recycle(); return; }
+            PixelCopy.request(video, target, result -> {
+                if (result != PixelCopy.SUCCESS || !resumed) {
+                    if (result != PixelCopy.SUCCESS && !sampleFailureLogged) {
+                        sampleFailureLogged = true;
+                        Log.w(TAG, "glass sample: PixelCopy result " + result);
+                    }
+                    sampling = false;
+                    if (resumed) main.postDelayed(refreshGlass, GLASS_RETRY_MS);
+                    return;
+                }
+                copyMs += android.os.SystemClock.uptimeMillis() - sampleStarted;
                 GLASS_WORKER.execute(() -> {
-                    Bitmap blurred = Blur.blurred(snapshot, 96, 4);
-                    snapshot.recycle();
-                    main.post(() -> { if (resumed && scenic && player != null) Scene.setStill(blurred); });
+                    long b0 = android.os.SystemClock.uptimeMillis();
+                    Bitmap frost = glassStream.blur(target, Blur.MOTION_SIDE, Blur.MOTION_RADIUS);
+                    blurMs += android.os.SystemClock.uptimeMillis() - b0;
+                    float lum = glassStream.luminance();
+                    main.post(() -> glassSampled(frost, lum));
                 });
             }, main);
         } catch (IllegalArgumentException e) {
-            copyInFlight = false;
-            snapshot.recycle();
+            sampling = false;
+            main.postDelayed(refreshGlass, GLASS_RETRY_MS);
         }
+    }
+
+    /** On the main thread: show the new frost and start the next copy, keeping to GLASS_FRAME_MS. */
+    private void glassSampled(Bitmap frost, float lum) {
+        sampling = false;
+        if (!resumed || !scenic || player == null) return;
+        Scene.setStill(frost, lum);
+        long took = android.os.SystemClock.uptimeMillis() - sampleStarted;
+        statTotalMs += took;
+        // One line per Home start: what the frost costs on this TV, for bug reports. Never repeated.
+        if (statSamples >= 0 && ++statSamples == 120) {
+            Log.i(TAG, "glass samples: " + statSamples + " at " + (statTotalMs / statSamples) + " ms each, copy "
+                    + (copyMs / statSamples) + " ms, blur " + (blurMs / statSamples) + " ms");
+            copyMs = 0;
+            blurMs = 0;
+            statSamples = -1;
+        }
+        main.removeCallbacks(refreshGlass);
+        main.postDelayed(refreshGlass, Math.max(8L, GLASS_FRAME_MS - took));
     }
 }

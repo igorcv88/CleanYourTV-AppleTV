@@ -57,7 +57,11 @@ final class ControlCenter {
         void next();
     }
 
-    static final int WIDTH_DP = 392;
+    static final int WIDTH_DP = 360;
+    /** Focus lift of a control: small, so it stays inside the card's padding. */
+    /** Top of the sheet, in dp: clear of the header's clock and buttons. */
+    static final int TOP_DP = 100;
+    static final float FOCUS_SCALE = 1.04f;
     private static final Interpolator EASE = new PathInterpolator(0.2f, 0.9f, 0.3f, 1f);
     private static final int TEXT = 0xFFF5F6F8, DIM = 0xB3F5F6F8, FAINT = 0x8CF5F6F8;
 
@@ -92,18 +96,23 @@ final class ControlCenter {
         // Above the dock's elevated cards; no scrim, Home stays as it was around the sheet.
         overlay.setElevation(dp(40));
         overlay.setClipChildren(false);
+        overlay.setClipToPadding(false);
         parent.addView(overlay, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
         card = new LinearLayout(ctx);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(16), dp(16), dp(16), dp(14));
-        SceneGlassDrawable.apply(card, 34f, GlassTone.Kind.PANEL);
-        card.setClipToOutline(true);
+        // Padding wider than any focus lift (FOCUS_SCALE on the widest control adds under 4dp a side, inside 16dp), and no
+        // clip to the outline: a focused capsule's rim used to be cut off at the card's edge.
+        card.setPadding(dp(16), dp(16), dp(16), dp(12));
+        card.setClipChildren(false);
+        card.setClipToPadding(false);
+        SceneGlassDrawable.apply(card, 30f, GlassTone.Kind.PANEL);
         card.setElevation(dp(18));
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(WIDTH_DP),
                 ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
-        lp.setMargins(0, dp(88), dp(42), 0);
+        // Below the header's buttons (they end near 88dp, and lift when focused), never over them.
+        lp.setMargins(0, dp(TOP_DP), dp(42), 0);
         overlay.addView(card, lp);
 
         buildStatusRow();
@@ -118,7 +127,8 @@ final class ControlCenter {
     private void buildStatusRow() {
         LinearLayout row = new LinearLayout(ctx);
         row.setClipChildren(false);
-        card.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(68)));
+        row.setClipToPadding(false);
+        card.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
         View network = capsule(row, R.drawable.ic_wifi, "Wi-Fi", "Network settings", false, actions::network);
         netIcon = network.findViewWithTag("icon");
         netTitle = network.findViewWithTag("title");
@@ -130,7 +140,7 @@ final class ControlCenter {
     private View capsule(LinearLayout row, int icon, String title, String detail, boolean second, Runnable action) {
         LinearLayout c = new LinearLayout(ctx);
         c.setGravity(Gravity.CENTER_VERTICAL);
-        c.setPadding(dp(12), 0, dp(12), 0);
+        c.setPadding(dp(8), 0, dp(10), 0);
         SceneGlassDrawable.apply(c, -1f, GlassTone.Kind.INSET);
         focusable(c, action);
         ImageView disc = new ImageView(ctx);
@@ -140,25 +150,25 @@ final class ControlCenter {
         disc.setScaleType(ImageView.ScaleType.CENTER);
         disc.setDuplicateParentStateEnabled(true);
         SceneGlassDrawable.apply(disc, -1f, GlassTone.Kind.INSET);
-        c.addView(disc, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        c.addView(disc, new LinearLayout.LayoutParams(dp(34), dp(34)));
         LinearLayout col = new LinearLayout(ctx);
         col.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams colLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        colLp.setMarginStart(dp(10));
+        colLp.setMarginStart(dp(9));
         c.addView(col, colLp);
-        TextView t = text(15, medium, TEXT);
+        TextView t = text(14, medium, TEXT);
         t.setTag("title");
         t.setText(title);
         col.addView(t);
-        TextView d = text(12.5f, regular, DIM);
+        TextView d = text(12, regular, DIM);
         d.setTag("detail");
         d.setText(detail);
         LinearLayout.LayoutParams dLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        dLp.topMargin = dp(2);
+        dLp.topMargin = dp(1);
         col.addView(d, dLp);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
-        if (second) lp.setMarginStart(dp(10));
+        if (second) lp.setMarginStart(dp(12));
         row.addView(c, lp);
         c.setContentDescription(title);
         return c;
@@ -167,18 +177,19 @@ final class ControlCenter {
     private void buildMedia() {
         LinearLayout platter = new LinearLayout(ctx);
         platter.setGravity(Gravity.CENTER_VERTICAL);
-        platter.setPadding(dp(8), dp(8), dp(12), dp(8));
+        platter.setPadding(dp(6), dp(6), dp(10), dp(6));
         platter.setClipChildren(false);
+        platter.setClipToPadding(false);
         SceneGlassDrawable.apply(platter, 24f, GlassTone.Kind.INSET);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(88));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(66));
         lp.topMargin = dp(10);
         card.addView(platter, lp);
 
         // Artwork and titles together: one target that opens Listen (or Music access when nothing plays).
         LinearLayout info = new LinearLayout(ctx);
         info.setGravity(Gravity.CENTER_VERTICAL);
-        info.setPadding(dp(6), dp(4), dp(10), dp(4));
-        info.setBackgroundResource(R.drawable.scenic_row_bg);
+        info.setPadding(dp(6), dp(4), dp(8), dp(4));
+        SceneGlassDrawable.focusSurface(info, 18f);
         focusable(info, () -> {
             if (mediaPlaying != null) actions.listen(); else actions.musicAccess();
         });
@@ -187,18 +198,18 @@ final class ControlCenter {
         art.setScaleType(ImageView.ScaleType.CENTER_CROP);
         art.setOutlineProvider(rounded(12));
         art.setClipToOutline(true);
-        info.addView(art, new LinearLayout.LayoutParams(dp(56), dp(56)));
+        info.addView(art, new LinearLayout.LayoutParams(dp(44), dp(44)));
         LinearLayout col = new LinearLayout(ctx);
         col.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams colLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        colLp.setMarginStart(dp(12));
+        colLp.setMarginStart(dp(10));
         info.addView(col, colLp);
-        mediaTitle = text(15, medium, TEXT);
+        mediaTitle = text(14, medium, TEXT);
         col.addView(mediaTitle);
-        mediaArtist = text(12.5f, regular, DIM);
+        mediaArtist = text(12, regular, DIM);
         LinearLayout.LayoutParams aLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        aLp.topMargin = dp(3);
+        aLp.topMargin = dp(2);
         col.addView(mediaArtist, aLp);
 
         prev = smallButton(platter, R.drawable.ic_skip_prev, "Previous", actions::previous);
@@ -214,8 +225,8 @@ final class ControlCenter {
         b.setContentDescription(description);
         SceneGlassDrawable.apply(b, -1f, GlassTone.Kind.INSET);
         focusable(b, action);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(40), dp(40));
-        lp.setMarginStart(dp(8));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(36), dp(36));
+        lp.setMarginStart(dp(6));
         row.addView(b, lp);
         return b;
     }
@@ -223,9 +234,10 @@ final class ControlCenter {
     private void buildShortcuts() {
         LinearLayout row = new LinearLayout(ctx);
         row.setClipChildren(false);
+        row.setClipToPadding(false);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(16);
+        lp.topMargin = dp(12);
         card.addView(row, lp);
         inputsColumn = shortcut(row, R.drawable.ic_input, "Inputs", actions::inputs);
         shortcut(row, R.drawable.ic_picture, "Scenery", actions::scenery);
@@ -239,6 +251,7 @@ final class ControlCenter {
         col.setOrientation(LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER_HORIZONTAL);
         col.setClipChildren(false);
+        col.setClipToPadding(false);
         ImageView b = new ImageView(ctx);
         b.setImageResource(icon);
         b.setImageTintList(ctx.getColorStateList(R.color.scenic_icon_tint));
@@ -246,13 +259,13 @@ final class ControlCenter {
         b.setContentDescription(caption);
         SceneGlassDrawable.apply(b, -1f, GlassTone.Kind.INSET);
         focusable(b, action);
-        col.addView(b, new LinearLayout.LayoutParams(dp(58), dp(58)));
-        TextView t = text(12.5f, medium, DIM);
+        col.addView(b, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        TextView t = text(12, medium, DIM);
         t.setText(caption);
         t.setGravity(Gravity.CENTER_HORIZONTAL);
         LinearLayout.LayoutParams tLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
-        tLp.topMargin = dp(7);
+        tLp.topMargin = dp(5);
         col.addView(t, tLp);
         row.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         return col;
@@ -261,16 +274,16 @@ final class ControlCenter {
     private void buildFooter() {
         LinearLayout row = new LinearLayout(ctx);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40));
-        lp.topMargin = dp(14);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34));
+        lp.topMargin = dp(8);
         card.addView(row, lp);
-        footer = text(12.5f, regular, FAINT);
+        footer = text(12, regular, FAINT);
         footer.setFontFeatureSettings("tnum");
         footer.setPadding(dp(8), 0, dp(8), 0);
         row.addView(footer, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         LinearLayout settings = new LinearLayout(ctx);
         settings.setGravity(Gravity.CENTER_VERTICAL);
-        settings.setPadding(dp(12), 0, dp(16), 0);
+        settings.setPadding(dp(10), 0, dp(14), 0);
         SceneGlassDrawable.apply(settings, -1f, GlassTone.Kind.INSET);
         settings.setContentDescription("TV settings");
         focusable(settings, actions::tvSettings);
@@ -278,8 +291,8 @@ final class ControlCenter {
         gear.setImageResource(R.drawable.ic_settings);
         gear.setImageTintList(ctx.getColorStateList(R.color.scenic_icon_tint));
         gear.setDuplicateParentStateEnabled(true);
-        settings.addView(gear, new LinearLayout.LayoutParams(dp(20), dp(20)));
-        TextView t = text(13, medium, TEXT);
+        settings.addView(gear, new LinearLayout.LayoutParams(dp(18), dp(18)));
+        TextView t = text(12.5f, medium, TEXT);
         t.setText("TV settings");
         t.setTextColor(ctx.getColorStateList(R.color.scenic_row_text));
         t.setDuplicateParentStateEnabled(true);
@@ -437,7 +450,7 @@ final class ControlCenter {
         v.setOnFocusChangeListener((x, focused) -> {
             // Reduced motion keeps the brighter glass and rim as feedback, without the lift.
             if (reducedMotion) return;
-            float s = focused ? 1.05f : 1f;
+            float s = focused ? FOCUS_SCALE : 1f;
             x.animate().scaleX(s).scaleY(s).setDuration(180).setInterpolator(EASE).start();
         });
     }

@@ -3,39 +3,62 @@ package com.gathin.tvhome;
 /**
  * The numbers behind Scenic Glass's one material, kept free of Android types so they run on the JVM.
  *
- * <p>A glass surface is: a share of the pre-blurred scene (never all of it, so the real wallpaper or aerial
- * still reads through), one adaptive tint, a sheen and a hairline rim. The tint adapts to how bright the scene
- * behind is: over a bright scene it is a smoked veil that keeps white text legible; over a dark scene it is
- * a faint white lift that gives the glass presence without turning milky. Both are blended analytically into
- * a single colour so a surface never stacks two tint fills.
+ * <p>A glass surface is: the frosted scene ({@link Blur#GLASS_SIDE}, about a 50 px blur) drawn almost
+ * opaque, one adaptive tint, a refracting lens band at the rim, a sheen and a specular edge. The frost is
+ * of the live scene, so its colour and light move with it: it reads as clear glass that diffuses what is
+ * behind, not a milky slab (an old, featureless ~90 px smear) nor nothing at all (a faint share of a stale
+ * sample, which let the sharp UI and video show straight through).
+ *
+ * <p>The tint adapts to how bright the scene behind is: over a bright scene a smoked veil that keeps white
+ * text legible, over a dark one a faint white lift. Both are blended analytically into a single colour so a
+ * surface never stacks two tint fills.
  */
 final class GlassTone {
     private GlassTone() { }
 
     /** What a surface is for. Larger surfaces carry more material; controls stay lighter. */
     enum Kind {
-        /** The dock: wide, low, holds coloured cards; the scenery must stay recognisable through it. */
-        CHROME(0.46f, 0x0A, 0x40, 0.30f),
-        /** Text-bearing panels (Settings, Control Center, menus, secondary screens). */
-        PANEL(0.62f, 0x18, 0x6A, 0.38f),
+        /** The dock: wide, low, holds coloured cards. */
+        CHROME(0.97f, 0x06, 0x2C, 0.28f, true),
+        /** Text-bearing panels (Settings, Control Center, menus, secondary screens): hide what is behind. */
+        PANEL(0.98f, 0x12, 0x4C, 0.34f, true),
         /** Round buttons and capsules sitting directly on the scene. */
-        CONTROL(0.40f, 0x08, 0x46, 0.22f),
-        /** Platters inside a panel: no second scene sample (glass on glass turns opaque), just a lift. */
-        INSET(0f, 0x00, 0x00, 0f);
+        CONTROL(0.97f, 0x04, 0x2A, 0.22f, true),
+        /**
+         * Controls inside a panel (Control Center capsules, platters): the same frost again, clear, with its own
+         * lens. Frost of the same scene on frost stays glass; a white lift made them milky.
+         */
+        INSET(0.95f, 0x00, 0x00, 0f, true),
+        /** The full-screen veil under All Apps over a moving aerial: frost so the icons read, no rim. */
+        BACKDROP(1f, 0x22, 0x46, 0f, false);
 
-        /** Share of the blurred scene sample drawn over the live background, 0..1. */
+        /** Share of the frosted scene sample drawn over the live background, 0..1. */
         final float sampleShare;
         /** Smoke alpha over a dark scene and over a bright one. */
         final int smokeDark, smokeBright;
         /** Outline alpha for the elevation shadow: a full shadow shows through translucent glass as grey haze. */
         final float shadowAlpha;
+        /** Draws the refracting band and the specular edge. */
+        final boolean lens;
 
-        Kind(float sampleShare, int smokeDark, int smokeBright, float shadowAlpha) {
+        Kind(float sampleShare, int smokeDark, int smokeBright, float shadowAlpha, boolean lens) {
             this.sampleShare = sampleShare;
             this.smokeDark = smokeDark;
             this.smokeBright = smokeBright;
             this.shadowAlpha = shadowAlpha;
+            this.lens = lens;
         }
+    }
+
+    /**
+     * The rim's lens: the band of glass along the edge shows the scene magnified by this factor about the
+     * surface's centre, so the scenery visibly bends where it meets the edge, as thick glass does.
+     */
+    static final float LENS_MAGNIFY = 1.08f;
+
+    /** Width of the lens band: a share of the surface's short side, within [min, max] dp. */
+    static float lensBandDp(float shortSideDp) {
+        return Math.max(2.5f, Math.min(6f, shortSideDp * 0.1f));
     }
 
     /** Luminance when nothing has been sampled yet (an aerial still starting): treated as a mid scene. */
@@ -76,25 +99,36 @@ final class GlassTone {
      */
     static int tint(Kind kind, float lum, boolean focused, boolean frosted) {
         if (kind == Kind.INSET) {
-            int a = focused ? 0x34 : 0x14;
+            int a = focused ? 0x0C : 0x08;
             return (a << 24) | 0xFFFFFF;
         }
         float l = lum < 0f ? 0.5f : Math.max(0f, Math.min(1f, lum));
         float bright = smoothstep(0.32f, 0.78f, l);
         float smoke = kind.smokeDark + (kind.smokeBright - kind.smokeDark) * bright;
         // White lift: present over dark scenes, almost gone over bright ones (where it would be milk).
-        float white = 0x16 - 0x10 * bright;
+        float white = 0x12 - 0x0C * bright;
+        // Focus brightens the glass itself (SceneGlassDrawable's focus filter), never a white veil over it.
         if (focused) {
-            white += 0x1E;
-            smoke *= 0.8f;
+            white += 0x06;
+            smoke *= 0.6f;
         }
-        if (frosted) smoke += 0x22;
+        if (frosted) smoke += 0x1C;
         return over(Math.round(white), 0xFFFFFF, Math.round(smoke), SMOKE_RGB);
     }
 
-    /** Share of the blurred sample for this surface; frosted glass carries a little more of it. */
+    /** Share of the frosted sample for this surface; frosted glass carries all of it. */
     static float sampleShare(Kind kind, boolean frosted) {
-        return Math.min(0.85f, kind.sampleShare + (frosted && kind != Kind.INSET ? 0.18f : 0f));
+        return kind.sampleShare <= 0f ? 0f : Math.min(1f, kind.sampleShare + (frosted ? 0.06f : 0f));
+    }
+
+    /**
+     * Tint when there is no sample at all yet (an aerial's first half second): a little more smoke, so the
+     * surface never reads as a bare outline over sharp video.
+     */
+    static int fallbackTint(Kind kind, float lum, boolean focused, boolean frosted) {
+        int t = tint(kind, lum, focused, frosted);
+        if (kind == Kind.INSET) return t;
+        return over(t >>> 24, t & 0xFFFFFF, 0x30, SMOKE_RGB);
     }
 
     /** Porter-Duff "top over bottom" of two flat colours with straight 0..255 alphas, as one ARGB colour. */

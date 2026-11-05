@@ -108,6 +108,8 @@ final class ScenicHome implements NowPlaying.Listener {
     private final TextView btnListen;
     private final ImageView wash;
     private final View dim;
+    private final SceneGlassDrawable appsFrost;
+    private final GradientDrawable appsShade;
     private ImageView still;
     private final ScenicWallpaperPlayer wallpaperGallery;
 
@@ -177,10 +179,13 @@ final class ScenicHome implements NowPlaying.Listener {
         root.addView(wash, Math.max(0, Math.min(washIndex, root.getChildCount())), full());
         wallpaperGallery = ScenicWallpaperPlayer.selected(a)
                 ? new ScenicWallpaperPlayer(a, root, root.indexOfChild(wash)) : null;
-        // Gentle shade for the Apps screen's names; Home itself stays open.
+        // Under All Apps: over a moving aerial, a full-screen veil of the same frosted glass, so the names
+        // read over the flight; over the album wash (already blurred) only a gentle shade.
         dim = new View(activity);
-        dim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x14080F18, 0x38080F18, 0x47080F18}));
+        appsFrost = new SceneGlassDrawable(dim, 0f, GlassTone.Kind.BACKDROP);
+        appsShade = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0x14080F18, 0x38080F18, 0x47080F18});
+        dim.setBackground(appsShade);
         dim.setAlpha(0f);
         dim.setVisibility(View.GONE);
         dim.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -281,8 +286,9 @@ final class ScenicHome implements NowPlaying.Listener {
         // ---- Glass Current ribbon: its line 25dp above the dock's top ----
         int dockTop = dp(36) + tileH + 2 * pad;
         ribbon = new GlassCurrentView(activity);
-        FrameLayout.LayoutParams ribbonLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36), Gravity.BOTTOM);
-        ribbonLp.setMargins(dp(64), 0, dp(64), dockTop + dp(25) - dp(18));
+        // Tall enough for the waves (RibbonSwells.MAX_HEIGHT_DP) above the line, which stays where it was.
+        FrameLayout.LayoutParams ribbonLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64), Gravity.BOTTOM);
+        ribbonLp.setMargins(dp(64), 0, dp(64), dockTop + dp(25) - dp(32));
         layer.addView(ribbon, ribbonLp);
         ribbon.setVisibility(View.GONE);
         ribbon.setSeekListener(this::seekBy);
@@ -484,7 +490,10 @@ final class ScenicHome implements NowPlaying.Listener {
         header.setVisibility(show ? View.GONE : View.VISIBLE);
         View gridFrame = a.gridFrame();
         dim.animate().cancel();
-        if (show) dim.setVisibility(View.VISIBLE);
+        if (show) {
+            dim.setBackground(washCovering() ? appsShade : appsFrost);
+            dim.setVisibility(View.VISIBLE);
+        }
         dim.animate().alpha(show ? 1f : 0f).setDuration(reducedMotion ? 120 : 300)
                 .withEndAction(() -> { if (!appsShown) dim.setVisibility(View.GONE); }).start();
         if (show) {
@@ -513,6 +522,8 @@ final class ScenicHome implements NowPlaying.Listener {
     final class DockAdapter extends RecyclerView.Adapter<DockAdapter.Holder> {
         private final int tileW, tileH;
         private final List<AppAdapter.Entry> items = new ArrayList<>();
+
+        private final ViewOutlineProvider cardOutline = rounded(16);
 
         DockAdapter(int tileW, int tileH) {
             this.tileW = tileW;
@@ -575,11 +586,15 @@ final class ScenicHome implements NowPlaying.Listener {
                 h.icon.setVisibility(View.VISIBLE);
                 h.label.setText(R.string.scenic_all_apps);
                 h.label.setVisibility(View.VISIBLE);
-                // Inside the dock's glass: a lift of the same material, not a second sampled sheet.
-                if (!(h.card.getBackground() instanceof SceneGlassDrawable))
-                    h.card.setBackground(new SceneGlassDrawable(h.card, 16f, GlassTone.Kind.INSET));
+                // A glass control in the dock, with the material's own faint shadow: a full-alpha outline shadow
+                // under translucent glass showed through as a grey slab when focus lifted the card.
+                if (!(h.card.getBackground() instanceof SceneGlassDrawable)) {
+                    h.card.setBackground(new SceneGlassDrawable(h.card, 16f, GlassTone.Kind.CONTROL));
+                }
+                h.card.setOutlineProvider(ViewOutlineProvider.BACKGROUND);
             } else {
                 AppAdapter.Entry e = items.get(pos);
+                h.card.setOutlineProvider(cardOutline);
                 if (h.card.getTag(R.id.tile_bg_orig) == null) h.card.setTag(R.id.tile_bg_orig, a.getDrawable(R.drawable.tile_bg));
                 BannerFit.bind(h.card, h.banner, h.icon, h.label, e, tileW, tileH, dp(16), false);
             }
@@ -604,7 +619,7 @@ final class ScenicHome implements NowPlaying.Listener {
                 icon = v.findViewById(R.id.icon);
                 label = v.findViewById(R.id.label);
                 glare = v.findViewById(R.id.glare);
-                card.setOutlineProvider(rounded(16));
+                card.setOutlineProvider(cardOutline);
                 card.setClipToOutline(true);
                 card.setOnClickListener(x -> {
                     int pos = getBindingAdapterPosition();
@@ -944,6 +959,7 @@ final class ScenicHome implements NowPlaying.Listener {
         syncControlCenterMedia();
         if (t == null) {
             ribbon.setPlaying(false);
+            ribbon.setLivePosition(null, 0);
             ribbon.setArtwork(null);
             if (listening) closeListen();
             if (!appsShown) {
@@ -1083,6 +1099,7 @@ final class ScenicHome implements NowPlaying.Listener {
         long pos = t.positionNow();
         float frac = MediaTime.fraction(pos, t.duration);
         ribbon.setProgress(frac, MediaTime.format(pos), MediaTime.formatRemaining(pos, t.duration));
+        ribbon.setLivePosition(MediaTime.advancing(t.state) ? t::positionNow : null, t.duration);
     }
 
     private void seekBy(long delta) {
@@ -1168,6 +1185,11 @@ final class ScenicHome implements NowPlaying.Listener {
         setArt(bigArt, track.art, 24f);
         focusMemory.push("listen", a.getCurrentFocus());
         listening = true;
+        // The same frost as All Apps over the aerial (the album wash needs none), fading in with the motion.
+        dim.animate().cancel();
+        dim.setBackground(washCovering() ? appsShade : appsFrost);
+        dim.setAlpha(0f);
+        dim.setVisibility(View.VISIBLE);
         listenLayer.setAlpha(0f);   // until the first frame of the animation places the art over the small one
         listenLayer.setVisibility(View.VISIBLE);
         listenLayer.post(() -> animateListen(true));
@@ -1227,6 +1249,8 @@ final class ScenicHome implements NowPlaying.Listener {
             dockFrame.setAlpha(1f - away);
             dockFrame.setTranslationY(dp(32) * away);
             ribbon.setTranslationY(ribbonDrop * t);
+            ribbon.setColour(t);
+            if (!appsShown) dim.setAlpha(t);
         });
         bigArt.setOutlineProvider(new ViewOutlineProvider() {
             @Override public void getOutline(View view, Outline outline) {
@@ -1269,6 +1293,11 @@ final class ScenicHome implements NowPlaying.Listener {
         dockFrame.setTranslationY(0f);
         dockFrame.setVisibility(appsShown ? View.GONE : View.VISIBLE);
         ribbon.setTranslationY(0f);
+        ribbon.setColour(0f);
+        if (!appsShown) {
+            dim.setAlpha(0f);
+            dim.setVisibility(View.GONE);
+        }
         View back = focusMemory.top() != null && "listen".equals(focusMemory.top()) ? focusMemory.pop() : null;
         if (back != null && back.isAttachedToWindow() && back.getVisibility() == View.VISIBLE && back.isFocusable()) back.requestFocus();
         else if (track != null) btnListen.requestFocus();
@@ -2334,7 +2363,7 @@ final class ScenicHome implements NowPlaying.Listener {
         int h = Math.max(180, a.getResources().getDisplayMetrics().heightPixels / 2);
         worker.execute(() -> {
             Bitmap img = Scenery.paint(w, h);
-            Bitmap blurred = Blur.blurred(img, 96, 4);
+            Bitmap blurred = Blur.glass(img);
             handler.post(() -> {
                 if (released) return;
                 BitmapDrawable d = new BitmapDrawable(a.getResources(), img);
@@ -2355,7 +2384,7 @@ final class ScenicHome implements NowPlaying.Listener {
             o.inSampleSize = 8;
             Bitmap b = BitmapFactory.decodeFile(file.getPath(), o);
             if (b == null) return;
-            Bitmap blurred = Blur.blurred(b, 96, 4);
+            Bitmap blurred = Blur.glass(b);
             handler.post(() -> { if (!released) Scene.setStill(blurred); });
         });
     }
@@ -2424,7 +2453,7 @@ final class ScenicHome implements NowPlaying.Listener {
         LinearLayout r = new LinearLayout(a);
         r.setGravity(Gravity.CENTER_VERTICAL);
         r.setPadding(dp(16), 0, dp(16), 0);
-        r.setBackgroundResource(R.drawable.scenic_row_bg);
+        SceneGlassDrawable.focusSurface(r, 16f);
         r.setFocusable(true);
         r.setClickable(true);
         TextView t = text(17, medium, TEXT);
