@@ -61,12 +61,8 @@ public class GlassToneTest {
             int overDark = GlassTone.tint(k, 0.1f, false, false);
             assertTrue(k + ": more material over a bright scene", alpha(overBright) > alpha(overDark));
             assertTrue(k + ": the bright-scene veil is dark, for white text", lum(overBright) < 0.25f);
-            // Only text panels keep a faint white lift over dark scenes; clear glass carries none (it read as frost).
-            if (k == GlassTone.Kind.PANEL) {
-                assertTrue(k + ": the dark-scene tint is lighter than the bright-scene one", lum(overDark) > lum(overBright));
-            } else {
-                assertTrue(k + ": no white lift on clear glass", alpha(overDark) <= 0x02 || lum(overDark) < 0.25f);
-            }
+            // No surface carries a white lift (it read as frost in the middle of clear glass).
+            assertTrue(k + ": no white lift", alpha(overDark) <= 0x02 || lum(overDark) < 0.25f);
         }
     }
 

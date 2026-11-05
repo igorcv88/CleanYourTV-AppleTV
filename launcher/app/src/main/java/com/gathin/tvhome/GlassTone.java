@@ -98,15 +98,13 @@ final class GlassTone {
      * @param frosted  the user's "Frosted" glass choice: more material, for very busy scenes
      */
     static int tint(Kind kind, float lum, boolean focused, boolean frosted) {
-        if (kind == Kind.INSET) {
-            int a = focused ? 0x0C : 0x08;
-            return (a << 24) | 0xFFFFFF;
-        }
+        // Inset glass (capsules, platters, focused rows) is the frost alone: any white tint read as milk.
+        if (kind == Kind.INSET) return 0;
         float l = lum < 0f ? 0.5f : Math.max(0f, Math.min(1f, lum));
         float bright = smoothstep(0.32f, 0.78f, l);
         float smoke = kind.smokeDark + (kind.smokeBright - kind.smokeDark) * bright;
-        // No white lift on the clear glass (it read as frost in the middle); text panels keep a faint one.
-        float white = kind == Kind.PANEL ? 0x0A - 0x08 * bright : 0f;
+        // No white lift anywhere: it read as frost in the middle of clear glass. Panels keep only dark smoke.
+        float white = 0f;
         // Focus brightens the glass itself (SceneGlassDrawable's focus filter), never a white veil over it.
         if (focused) smoke *= 0.6f;
         if (frosted) smoke += 0x1C;

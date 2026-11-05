@@ -75,7 +75,7 @@ final class SceneGlassDrawable extends Drawable {
     private Bitmap shaderBitmap;
     private int alpha = 255;
     private boolean focused, selected;
-    /** A row's focus surface: glass only while focused or selected, nothing at rest. */
+    /** A row's focus surface: glass only while focused; a chosen row shows its check mark, not glass. */
     private boolean focusOnly;
     private float toneLum = Float.NaN;
     private boolean toneFocused, toneSampled;
@@ -90,8 +90,8 @@ final class SceneGlassDrawable extends Drawable {
     }
 
     /**
-     * A list row's focus surface (Settings, screens, menus): clear lens glass while the row is focused or
-     * chosen, nothing at rest. Replaces the white #22 fill that read as a milky veil.
+     * A list row's focus surface (Settings, screens, menus): clear lens glass while the row is focused, nothing
+     * otherwise. A chosen row is marked by its check alone: glass on both made focus and choice look alike.
      */
     static SceneGlassDrawable focusSurface(View v, float radiusDp) {
         SceneGlassDrawable d = new SceneGlassDrawable(v, radiusDp, GlassTone.Kind.INSET);
@@ -159,7 +159,7 @@ final class SceneGlassDrawable extends Drawable {
     @Override
     public void draw(@NonNull Canvas c) {
         rect.set(getBounds());
-        if (rect.isEmpty() || (focusOnly && !focused && !selected)) return;
+        if (rect.isEmpty() || (focusOnly && !focused)) return;
         float r = cornerRadius();
         float share = GlassTone.sampleShare(kind, frosted);
         boolean sampled = share > 0f && drawSample(c, r, share);
