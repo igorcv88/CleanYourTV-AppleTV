@@ -63,11 +63,9 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
      * and blurred on a worker (Blur.Stream, two reused bitmaps), and the next copy starts as soon as one
      * is on screen, up to this rate. Never a live GPU blur, a UI-thread pixel loop or an allocation per sample.
      */
-    // 10 a second: the moving frost reads as continuous, and the copies leave the TV's CPU for the music app
-    // (15 a second took noticeably more and the music app's audio broke up under load).
-    // With music playing over the aerial the rate stays (a slower frost visibly lags the video); the sample
-    // gets smaller instead (Blur.MUSIC_SIDE), leaving the TV's CPU to the music app.
-    private static final long GLASS_FRAME_MS = 100L;
+    // About 15 a second: at 10 the frost visibly stepped behind the moving video. Where CPU is short while music
+    // plays, Appearance > "Lighter glass with music" shrinks the sample (Blur.MUSIC_SIDE) at the same rate.
+    private static final long GLASS_FRAME_MS = 66L;
     /** After a refused copy (the surface between frames, a seek): try again a little later. */
     private static final long GLASS_RETRY_MS = 500L;
     private static final ExecutorService GLASS_WORKER = Executors.newSingleThreadExecutor();
