@@ -186,6 +186,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private final int dockSize;
     /** config dock_row: false makes the dock apps the first tiles of one plain grid (names shown, no empty slots). */
     private final boolean dockRow;
+    /** Scenic draws its own floating dock; the RecyclerView is entirely an app grid. */
+    private final boolean scenicHome;
     /** config single_row: tiles sit in one sideways row, each as wide as a grid column would be. */
     private final boolean singleRow;
     /** config always_show_names: the alpha of an unfocused tile's name (0 hides it). */
@@ -223,6 +225,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     /** Packages drawn from their icon and name even when they have a banner (config.xml icon_tiles). */
     private final Set<String> iconTiles;
     private final List<Entry> items = new ArrayList<>();
+    /** The complete installed list also supplies Scenic's dock, even while its grid is filtered. */
+    private final List<Entry> allItems = new ArrayList<>();
+    private final Set<String> scenicDockPackages = new HashSet<>();
 
     AppAdapter(Context ctx, TileListener listener, int dockSize, Config cfg) {
         this.ctx = ctx;
@@ -241,8 +246,10 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         this.rowsBelowDock = cfg.rowsBelowDock;
         this.dockTitle = cfg.dockTitle;
         this.dockRow = cfg.dockRow;
+        this.scenicHome = cfg.scenicHome;
         this.singleRow = cfg.singleRow;
-        this.restNameAlpha = cfg.alwaysShowNames ? 0.75f : 0f;
+        // Every Scenic app tile keeps its label: no row inside its grid is a dock row.
+        this.restNameAlpha = cfg.scenicHome || cfg.alwaysShowNames ? 0.75f : 0f;
         this.cinematic = cfg.cinematicHome;
         this.launchActions = cfg.launchActions;
         this.iconTiles = new HashSet<>(Arrays.asList(ctx.getResources().getStringArray(R.array.icon_tiles)));
@@ -337,13 +344,38 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         }
         docked = 0;
         while (docked < fresh.size() && isDocked(fresh.get(docked))) docked++;
-        emptySlots = dockRow && !reordering ? DockSlots.empty(docked, dockSize, fresh.size(), fillDock) : 0;
+        // Scenic has an independent floating dock; phantom classic slots must never affect
+        // its grid focus positions, even when fill_dock is disabled by a theme.
+        emptySlots = !scenicHome && dockRow && !reordering
+                ? DockSlots.empty(docked, dockSize, fresh.size(), fillDock) : 0;
         for (int i = 0; i < emptySlots; i++) {
             fresh.add(docked + i, new Entry(Entry.EMPTY, "", new ComponentName(ctx, "empty-dock-slot-" + i),
                     null, null, null, 0));
         }
+        allItems.clear();
+        allItems.addAll(fresh);
+        rebuildScenicGrid();
+    }
+
+    /** Scenic-only presentation filter. The upstream Home does not call this method. */
+    void setScenicDockPackages(List<String> visibleDock) {
+        Set<String> next = new HashSet<>(visibleDock);
+        if (scenicDockPackages.equals(next)) return;
+        scenicDockPackages.clear();
+        scenicDockPackages.addAll(next);
+        rebuildScenicGrid();
+    }
+
+    private void rebuildScenicGrid() {
         items.clear();
-        items.addAll(fresh);
+        if (scenicHome) {
+            List<Entry> present = new ArrayList<>(allItems.size());
+            for (Entry e : allItems) if (e.kind != Entry.EMPTY) present.add(e);
+            items.addAll(ScenicGridFilter.withoutDock(present, scenicDockPackages,
+                    e -> e.kind == Entry.APP || e.kind == Entry.CARD ? e.pkg : null));
+        } else {
+            items.addAll(allItems);
+        }
         notifyDataSetChanged();
     }
 
@@ -394,6 +426,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     /** Lets go of every tile and its artwork (Home is in the background and memory is short). */
     void clear() {
         items.clear();
+        allItems.clear();
         notifyDataSetChanged();
     }
 
@@ -479,7 +512,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         h.name.setText(e.name);
         // The dock has no labels, unless always_show_names asks for them (DockDecoration then makes room in the band).
         // In a single row every tile is the dock's kind: the big title above names it.
-        boolean dockKind = DockSlots.inDockRow(dockRow, singleRow, position, dockSize);
+        boolean dockKind = !scenicHome && DockSlots.inDockRow(dockRow, singleRow, position, dockSize);
         h.name.setVisibility(dockKind && restNameAlpha == 0f ? View.INVISIBLE : View.VISIBLE);
         h.inDock = dockKind;
         boolean focused = h.card.isFocused();   // a rebind after reload() can hit the focused tile
@@ -574,7 +607,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     /** Installed app tiles exposed to the optional Scenic favourites and Apps screens. */
     List<Entry> entries() {
         List<Entry> out = new ArrayList<>();
-        for (Entry e : items) if (e.kind == Entry.APP) out.add(e);
+        for (Entry e : allItems) if (e.kind == Entry.APP) out.add(e);
         return out;
     }
 
@@ -583,7 +616,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     @Override public int getItemViewType(int position) { return isLibraryAt(position) ? 1 : 0; }
 
     boolean containsPackage(String pkg) {
-        for (Entry entry : items) if (entry.pkg.equals(pkg)) return true;
+        // The App library asks whether a package is on Home, not merely in the visible Scenic grid.
+        // Dock favourites are part of Home even though the grid hides their duplicate tiles.
+        for (Entry entry : allItems) if (entry.pkg.equals(pkg)) return true;
         return false;
     }
 
@@ -636,6 +671,14 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     /** Moves one tile; the others shift by one. Stable ids keep the moved tile's view (and its focus). */
     void move(int from, int to) {
         if (from == to || from < 0 || to < 0 || from >= movableCount() || to >= movableCount()) return;
+        Entry moved = items.get(from);
+        Entry destination = items.get(to);
+        // Reordering the visible grid must not drop or reshuffle the hidden dock favourites.
+        int sourceIndex = allItems.indexOf(moved);
+        if (sourceIndex >= 0 && allItems.contains(destination)) {
+            allItems.remove(sourceIndex);
+            allItems.add(allItems.indexOf(destination) + (from < to ? 1 : 0), moved);
+        }
         items.add(to, items.remove(from));
         notifyItemMoved(from, to);
         // The dock row hides names by position: rebind the tiles whose side of the dock edge changed.
