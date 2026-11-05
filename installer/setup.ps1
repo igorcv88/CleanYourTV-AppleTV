@@ -8,21 +8,55 @@ if (-not (Test-Path $apk)) { throw 'Extract the full Setup ZIP before running.' 
 $env:TV_HOST = $TvHost
 Push-Location $root
 try {
-    $py = 'tools\venv\Scripts\python.exe'
-    if (-not (Test-Path $py)) { python -m venv tools\venv }
+    # All Windows tools and optional add-ons expect tools/venv in the extracted ZIP.
+    # Recreate it automatically for each ZIP; only the ADB identity lives outside it.
+    $venvDir = 'tools\venv'
+    if ($env:LOCALAPPDATA) {
+        $stateDir = Join-Path $env:LOCALAPPDATA 'CleanYourTV'
+        $env:CLEANYOURTV_ADB_KEYDIR = Join-Path $stateDir 'adbkey'
+    }
+    $py = Join-Path $venvDir 'Scripts\python.exe'
+    if (-not (Test-Path $py)) {
+        if (Get-Command py.exe -ErrorAction SilentlyContinue) { & py.exe -3 -m venv $venvDir }
+        elseif (Get-Command python.exe -ErrorAction SilentlyContinue) { & python.exe -m venv $venvDir }
+        else { throw 'Python 3.10+ not found. Install Python, then run Setup again.' }
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $py)) { throw 'Python environment setup failed; TV unchanged.' }
+    }
     & $py -m pip -q install -r tools\requirements.txt
+    if ($LASTEXITCODE -ne 0) { throw 'Python dependencies could not be installed; TV unchanged.' }
+    $env:CLEANYOURTV_PYTHON = (Resolve-Path $py).Path
     & $py -I tools\tv.py --probe
-    $fingerprint = (& $py -I tools\tv.py 'getprop ro.build.fingerprint' | Select-Object -Last 1).Trim()
+    if ($LASTEXITCODE -ne 0) { throw "TV $TvHost unreachable or ADB not authorized; TV unchanged." }
+    $fingerprintResult = @(& $py -I tools\tv.py 'getprop ro.build.fingerprint')
+    if ($LASTEXITCODE -ne 0 -or $fingerprintResult.Count -eq 0) {
+        throw 'Firmware fingerprint unavailable; no changes made.'
+    }
+    $fingerprint = "$($fingerprintResult[-1])".Trim()
     if (-not $fingerprint) { throw 'Firmware fingerprint unavailable; no changes made.' }
-    $home = (& $py -I tools\tv.py 'cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME' | Select-Object -Last 1).Trim()
+    $homeResult = @(& $py -I tools\tv.py 'cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME')
+    if ($LASTEXITCODE -ne 0 -or $homeResult.Count -eq 0) {
+        throw 'Original Home unavailable; no changes made.'
+    }
+    $originalHome = "$($homeResult[-1])".Trim()
+    if (-not $originalHome) { throw 'Original Home unavailable; no changes made.' }
     New-Item -ItemType Directory -Force recovery | Out-Null
-    $home | Set-Content recovery\home-before-install.txt
+    $originalHome | Set-Content recovery\home-before-install.txt
     & $py -I tools\tv.py 'pm list packages -d' | Set-Content recovery\packages-disabled-before-install.txt
-    Write-Host "TV firmware: $fingerprint; original Home: $home"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not record disabled packages; TV unchanged.' }
+    if ($env:LOCALAPPDATA) {
+        $archive = Join-Path $stateDir ('recovery\' + ($TvHost -replace '[^A-Za-z0-9.-]', '_') + '_' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
+        New-Item -ItemType Directory -Path $archive -Force | Out-Null
+        Copy-Item recovery\home-before-install.txt,recovery\packages-disabled-before-install.txt -Destination $archive
+        Write-Host "Recovery copy: $archive"
+    }
+    Write-Host "TV firmware: $fingerprint; original Home: $originalHome"
     Write-Host 'Installing signed launcher; leaving stock Home enabled.'
     & launcher\build-and-install.ps1 -TvHost $TvHost -StockLauncher none -PrebuiltApk $apk
     if (-not $?) { throw 'Home install failed; original stock Home was not disabled.' }
     Write-Host 'The optional upstream optimizations require an exact firmware profile and separate confirmation.'
     Write-Host 'Review examples\<model>\debloat.txt, then tools\disable.ps1 or tools\restore.ps1.'
     Write-Host 'Turn off ADB debugging after validation.'
-} finally { Pop-Location }
+} finally {
+    Remove-Item Env:\CLEANYOURTV_PYTHON -ErrorAction SilentlyContinue
+    Pop-Location
+}

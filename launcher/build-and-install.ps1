@@ -44,7 +44,7 @@ if ($PrebuiltApk) {
     throw 'SKIP_BUILD=1 but there is no app\build\outputs\apk\release\app-release.apk; build it first (tools\docker-build.ps1)'
 }
 
-$py = '..\tools\venv\Scripts\python.exe'
+$py = if ($env:CLEANYOURTV_PYTHON) { $env:CLEANYOURTV_PYTHON } else { '..\tools\venv\Scripts\python.exe' }
 # Which app owns Home differs by build; ask the TV, but only accept a launcher we recognise (the answer
 # can also be Android's chooser "android", the setup wizard, or another third-party launcher).
 # ColorOS TV's com.heytap.tv.launcher stays out of the list below: recognising it would disable

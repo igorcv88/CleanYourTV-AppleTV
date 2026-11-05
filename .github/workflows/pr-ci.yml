@@ -23,6 +23,22 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Generated tables must be current
         run: python tools/gen_tables.py --check
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Windows EXE entrypoint unit tests and cross-compilation
+        run: |
+          GO111MODULE=off go test ./installer/windows
+          GO111MODULE=off GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$RUNNER_TEMP/CleanYourTV-Setup.exe" ./installer/windows
+          test "$(head -c 2 "$RUNNER_TEMP/CleanYourTV-Setup.exe")" = 'MZ'
+
+  windows-setup:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PowerShell 5.1 device catalog and syntax regression tests
+        shell: powershell
+        run: .\installer\tests\test-devices.ps1
 
   launcher:
     needs: tool-tests

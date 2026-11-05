@@ -34,6 +34,9 @@ jobs:
         with:
           packages: platforms;android-34 build-tools;34.0.0
       - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
 
       # This is the ONLY validation workflow in the fork: tests run when the owner
       # explicitly requests a release, never on a push or pull request.
@@ -133,9 +136,13 @@ jobs:
           name="CleanYourTV-Scenic-v${VERSION}-Setup"
           stage="$RUNNER_TEMP/$name"
           mkdir -p "$stage/launcher" "$stage/installer"
+          GO111MODULE=off GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+            go build -trimpath -ldflags='-s -w' -o "$stage/CleanYourTV-Setup.exe" ./installer/windows
+          test -s "$stage/CleanYourTV-Setup.exe"
+          test "$(head -c 2 "$stage/CleanYourTV-Setup.exe")" = 'MZ'
           cp "release/$APK" "$stage/CleanYourTV-Scenic.apk"
           cp launcher/build-and-install.sh launcher/build-and-install.ps1 "$stage/launcher/"
-          cp installer/setup.sh installer/setup.ps1 "$stage/installer/"
+          cp installer/setup.sh installer/setup.ps1 installer/devices.ps1 installer/interactive.ps1 "$stage/installer/"
           cp installer/README.md "$stage/README.md"
           # tools/venv is a runner-local *Linux* environment. Never bundle it:
           # Windows/macOS installers must create their own native tools/venv.
