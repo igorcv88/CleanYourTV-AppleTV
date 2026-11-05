@@ -226,7 +226,7 @@
     <string name="aerials_done">%s is ready in Background</string>
     <string name="aerials_removed">%s removed</string>
     <string name="aerials_manage_downloaded">Manage downloaded aerial videos</string>
-    <string name="aerials_none_downloaded">No aerial videos are stored in this launcher's files.</string>
+    <string name="aerials_none_downloaded">No aerial videos are stored in this launcher\'s files.</string>
     <string name="aerials_confirm_remove_title">Delete aerial video?</string>
     <string name="aerials_confirm_remove">Delete %1$s from this TV? This frees storage and the video can be downloaded again.</string>
     <string name="aerials_delete">Delete video</string>
