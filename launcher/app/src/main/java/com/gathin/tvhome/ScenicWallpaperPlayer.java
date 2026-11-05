@@ -82,7 +82,7 @@ final class ScenicWallpaperPlayer {
                     JSONObject j = records.optJSONObject(i);
                     if (j == null) continue;
                     String filename = j.optString("file", "");
-                    if (!filename.matches("[a-z]+_[0-9]+\\.jpg")) continue;
+                    if (!filename.matches("[a-z_]+_[0-9]+\\.jpg") || !filename.startsWith(g.id + "_")) continue;
                     File file = new File(folder, filename);
                     if (file.isFile() && file.length() > 0) {
                         result.add(new ScenicWallpaperCatalog.Item(g.id + "/" + filename, g.id,
