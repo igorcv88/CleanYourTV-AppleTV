@@ -4,6 +4,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
+import android.graphics.Outline;
 import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
@@ -26,22 +27,40 @@ final class SceneGlassDrawable extends Drawable {
     private final Paint scene = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint tint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
+    /** Slightly offset sample along the rim: optical edge, without a live blur or extra opaque sheet. */
+    private final Paint refractedRim = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Matrix matrix = new Matrix();
+    private final Matrix rimMatrix = new Matrix();
     private final RectF rect = new RectF();
     private final int[] loc = new int[2];
     private Bitmap shaderBitmap;
     private int alpha = 255;
     private final int tintColor;
+    private final float density;
+    private boolean focused;
 
     SceneGlassDrawable(View host, float radiusDp, int tintColor) {
         this.host = host;
-        float d = host.getResources().getDisplayMetrics().density;
-        this.radius = radiusDp * d;
+        density = host.getResources().getDisplayMetrics().density;
+        this.radius = radiusDp < 0 ? -1f : radiusDp * density;
         this.tintColor = tintColor;
         tint.setColor(tintColor);
         edge.setStyle(Paint.Style.STROKE);
-        edge.setStrokeWidth(Math.max(1f, d));
+        edge.setStrokeWidth(Math.max(1f, density));
+        refractedRim.setStyle(Paint.Style.STROKE);
+        refractedRim.setStrokeWidth(Math.max(1.5f, density * 2f));
         Scene.register(host);
+    }
+
+    @Override public boolean isStateful() { return true; }
+
+    @Override protected boolean onStateChange(int[] state) {
+        boolean next = false;
+        for (int value : state) if (value == android.R.attr.state_focused) { next = true; break; }
+        if (focused == next) return false;
+        focused = next;
+        invalidateSelf();
+        return true;
     }
 
     @Override
@@ -54,13 +73,15 @@ final class SceneGlassDrawable extends Drawable {
     @Override
     public void draw(@NonNull Canvas c) {
         rect.set(getBounds());
+        float r = radius < 0 ? Math.min(rect.width(), rect.height()) / 2f : radius;
         Bitmap bmp = Scene.current();
-        if (bmp != null && !bmp.isRecycled()) {
+        View rootView = host.getRootView();
+        if (bmp != null && !bmp.isRecycled() && rootView.getWidth() > 0 && rootView.getHeight() > 0) {
             if (bmp != shaderBitmap) {
                 scene.setShader(new BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
+                refractedRim.setShader(new BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
                 shaderBitmap = bmp;
             }
-            View rootView = host.getRootView();
             float[] cover = SceneCrop.cover(bmp.getWidth(), bmp.getHeight(), rootView.getWidth(), rootView.getHeight());
             host.getLocationInWindow(loc);
             matrix.setScale(cover[0], cover[0]);
@@ -71,14 +92,30 @@ final class SceneGlassDrawable extends Drawable {
             }
             scene.getShader().setLocalMatrix(matrix);
             scene.setAlpha(alpha);
-            c.drawRoundRect(rect, radius, radius, scene);
+            c.drawRoundRect(rect, r, r, scene);
+            // The rim bends a *cached* part of the same scene by a couple of pixels. Nothing is captured
+            // or blurred when focus changes. A single narrow stroke avoids the old stacked-pane bands.
+            rimMatrix.set(matrix);
+            rimMatrix.postTranslate(density * 2f, -density);
+            refractedRim.getShader().setLocalMatrix(rimMatrix);
+            refractedRim.setAlpha(focused ? alpha / 2 : alpha / 3);
+            float rimInset = refractedRim.getStrokeWidth();
+            rect.inset(rimInset, rimInset);
+            c.drawRoundRect(rect, Math.max(0f, r - rimInset), Math.max(0f, r - rimInset), refractedRim);
+            rect.inset(-rimInset, -rimInset);
         }
-        tint.setAlpha(Math.round((tintColor >>> 24) * alpha / 255f));
-        c.drawRoundRect(rect, radius, radius, tint);
+        tint.setAlpha(Math.min(255, Math.round(((tintColor >>> 24) + (focused ? 20 : 0)) * alpha / 255f)));
+        c.drawRoundRect(rect, r, r, tint);
         float inset = edge.getStrokeWidth() / 2f;
         rect.inset(inset, inset);
-        edge.setAlpha(alpha);
-        c.drawRoundRect(rect, Math.max(0, radius - inset), Math.max(0, radius - inset), edge);
+        edge.setAlpha(focused ? alpha : Math.round(alpha * 0.66f));
+        c.drawRoundRect(rect, Math.max(0, r - inset), Math.max(0, r - inset), edge);
+    }
+
+    @Override public void getOutline(@NonNull Outline outline) {
+        android.graphics.Rect b = getBounds();
+        float r = radius < 0 ? Math.min(b.width(), b.height()) / 2f : radius;
+        outline.setRoundRect(b, r);
     }
 
     @Override public void setAlpha(int a) {

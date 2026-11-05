@@ -1044,6 +1044,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
     void pauseAerial() { if (scenicAerial != null) scenicAerial.pause(); }
     void resumeAerial() { if (scenicAerial != null && resumed) scenicAerial.resume(); }
+    void setAerialAudioPlaying(boolean playing) {
+        if (scenicAerial != null) scenicAerial.setExternalAudioPlaying(playing);
+    }
 
     void showSounds() {
         if (scenicSound == null) return;

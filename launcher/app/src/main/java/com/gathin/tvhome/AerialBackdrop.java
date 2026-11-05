@@ -40,6 +40,13 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
     private final View gridDim;
     private final SharedPreferences prefs;
     private MediaPlayer player;
+    private File preparedFor, preparedFile;
+    private boolean preparedVideoOnly;
+    private boolean preparing;
+    private volatile boolean externalAudioPlaying;
+    /** Spotify can briefly report no active session at a track boundary; do not revive audio then. */
+    private static final long AUDIO_END_GRACE_MS = 3500L;
+    private int prepareGeneration;
     private SurfaceView video;
     private SurfaceHolder surface;
     private boolean resumed;
@@ -47,7 +54,15 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
     /** One downsampled frame every 16 seconds, never live GPU blur or a UI-thread pixel loop. */
     private static final long GLASS_SAMPLE_MS = 16_000L;
     private static final ExecutorService GLASS_WORKER = Executors.newSingleThreadExecutor();
+    /** Video-only remux copies encoded samples once; it never decodes or re-encodes the wallpaper. */
+    private static final ExecutorService VIDEO_WORKER = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final Runnable musicEnded = () -> {
+        externalAudioPlaying = false;
+        // A remux may have been deferred while Spotify was playing; try again when the mixer is idle.
+        if (!preparedVideoOnly) preparedFor = null;
+        start();
+    };
     private boolean copyInFlight;
     private final Runnable refreshGlass = this::sampleGlass;
 
@@ -157,6 +172,12 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
         cover.animate().cancel();
         cover.animate().alpha(1f).setDuration(300).withEndAction(() -> {
             file = next;
+            preparedFor = null;
+            preparedFile = null;
+            preparedVideoOnly = false;
+            // Ignore a remux for the previous aerial if cycling advanced while it was preparing.
+            prepareGeneration++;
+            preparing = false;
             start();
         }).start();
     }
@@ -221,6 +242,24 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
         start();
     }
 
+    /** A silent aerial may run beside Spotify; an unstrippable one must yield its audio track. */
+    void setExternalAudioPlaying(boolean playing) {
+        main.removeCallbacks(musicEnded);
+        if (!playing) {
+            if (externalAudioPlaying) main.postDelayed(musicEnded, AUDIO_END_GRACE_MS);
+            return;
+        }
+        if (externalAudioPlaying) return;
+        externalAudioPlaying = true;
+        if (!ScenicAudioPolicy.allowAerial(true, preparedVideoOnly)) {
+            release();
+            cover.animate().cancel();
+            cover.setAlpha(1f);
+        } else {
+            start();
+        }
+    }
+
     void pause() {
         resumed = false;
         release();
@@ -230,11 +269,43 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
 
     private void start() {
         if (!resumed || surface == null || player != null) return;
+        // The classic upstream Home keeps its original playback and startup cost.
+        if (!scenic && (preparedFor == null || !preparedFor.equals(file))) {
+            preparedFor = file;
+            preparedFile = file;
+            preparedVideoOnly = false;
+        }
+        if (preparedFor != null && preparedFor.equals(file)
+                && (preparedFile == null || !preparedFile.canRead())) preparedFor = null;
+        if (preparedFor == null || !preparedFor.equals(file)) {
+            if (preparing) return;
+            preparing = true;
+            final int generation = ++prepareGeneration;
+            final File source = file;
+            File cacheRoot = context.getExternalCacheDir();
+            final File cache = cacheRoot == null ? null : new File(cacheRoot, "aerial-video-only");
+            VIDEO_WORKER.execute(() -> {
+                AerialVideoOnly.Result result = AerialVideoOnly.prepare(source, cache, () -> externalAudioPlaying);
+                main.post(() -> {
+                    if (generation != prepareGeneration || !file.equals(source)) return;
+                    preparing = false;
+                    preparedFor = source;
+                    preparedFile = result.file;
+                    preparedVideoOnly = result.videoOnly;
+                    Log.i(TAG, "aerial prepared; verified video-only=" + preparedVideoOnly);
+                    start();
+                });
+            });
+            return;
+        }
+        // If a container cannot be remuxed or storage is low, keep Spotify's audio pipeline unshared.
+        if (!ScenicAudioPolicy.allowAerial(externalAudioPlaying, preparedVideoOnly)) return;
         MediaPlayer mp = new MediaPlayer();
         player = mp;
         try {
-            mp.setDataSource(file.getPath());
+            mp.setDataSource(preparedFile.getPath());
             mp.setDisplay(surface);
+            // Harmless for video-only media; never rely on this to suppress an actual audio track.
             mp.setVolume(0f, 0f);
             // One aerial loops; cycling plays each through once and then moves on.
             mp.setLooping(!cycle);

@@ -319,7 +319,7 @@ final class ScenicHome implements NowPlaying.Listener {
         btnListen.setTextColor(a.getColorStateList(R.color.scenic_row_text));
         btnListen.setGravity(Gravity.CENTER);
         btnListen.setPadding(dp(22), 0, dp(22), 0);
-        btnListen.setBackgroundResource(R.drawable.scenic_pill_bg);
+        btnListen.setBackground(new SceneGlassDrawable(btnListen, -1f, 0x2AFFFFFF));
         btnListen.setFocusable(true);
         btnListen.setClickable(true);
         LinearLayout.LayoutParams listenLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44));
@@ -554,7 +554,8 @@ final class ScenicHome implements NowPlaying.Listener {
                 h.icon.setVisibility(View.VISIBLE);
                 h.label.setText(R.string.scenic_all_apps);
                 h.label.setVisibility(View.VISIBLE);
-                h.card.setBackground(new LiquidGlassDrawable(16f, 0x33FFFFFF));
+                if (!(h.card.getBackground() instanceof SceneGlassDrawable))
+                    h.card.setBackground(new SceneGlassDrawable(h.card, 16f, 0x33FFFFFF));
             } else {
                 AppAdapter.Entry e = items.get(pos);
                 if (h.card.getTag(R.id.tile_bg_orig) == null) h.card.setTag(R.id.tile_bg_orig, a.getDrawable(R.drawable.tile_bg));
@@ -870,6 +871,10 @@ final class ScenicHome implements NowPlaying.Listener {
 
     @Override
     public void onNowPlaying(NowPlaying.Track t) {
+        // Spotify's advanced mixes run inside Spotify. Never mix a muted aerial AudioTrack into the
+        // same output: if a video-only copy is unavailable, the wallpaper yields to playback.
+        a.setAerialAudioPlaying(t != null && (MediaTime.advancing(t.state)
+                || t.state == MediaTime.STATE_BUFFERING));
         NowPlaying.Track old = track;
         track = t;
         if (t == null) {
@@ -931,7 +936,8 @@ final class ScenicHome implements NowPlaying.Listener {
         } else {
             view.setImageResource(R.drawable.ic_music);
             view.setScaleType(ImageView.ScaleType.CENTER);
-            view.setBackground(new LiquidGlassDrawable(radiusDp, 0x33FFFFFF));
+            if (!(view.getBackground() instanceof SceneGlassDrawable))
+                view.setBackground(new SceneGlassDrawable(view, radiusDp, 0x33FFFFFF));
         }
     }
 
@@ -1047,7 +1053,7 @@ final class ScenicHome implements NowPlaying.Listener {
         openApp.setTextColor(a.getColorStateList(R.color.scenic_row_text));
         openApp.setGravity(Gravity.CENTER);
         openApp.setPadding(dp(22), 0, dp(22), 0);
-        openApp.setBackgroundResource(R.drawable.scenic_pill_bg);
+        openApp.setBackground(new SceneGlassDrawable(openApp, -1f, 0x2AFFFFFF));
         openApp.setFocusable(true);
         openApp.setClickable(true);
         LinearLayout.LayoutParams oa = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44));
@@ -2068,7 +2074,7 @@ final class ScenicHome implements NowPlaying.Listener {
         ImageView b = new ImageView(a);
         b.setImageResource(icon);
         b.setImageTintList(a.getColorStateList(R.color.scenic_icon_tint));
-        b.setBackgroundResource(R.drawable.scenic_round_bg);
+        b.setBackground(new SceneGlassDrawable(b, -1f, 0x2AFFFFFF));
         b.setScaleType(ImageView.ScaleType.CENTER);
         b.setFocusable(true);
         b.setClickable(true);
