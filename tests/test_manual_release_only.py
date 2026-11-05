@@ -1,8 +1,8 @@
-"""The fork spends GitHub Actions minutes only when its owner publishes a release.
+"""PR validation is automatic; signed publication remains owner-triggered.
 
-There must be one workflow, triggered manually. It validates source and builds/signs
-the APK, then attaches the APK, its SHA-256 and the complete setup ZIP with its
-SHA-256 directly to GitHub Releases; no Actions artifacts are uploaded.
+Pull requests test tools and compile the launcher without production keys.
+The separate manual workflow validates, signs and publishes the release directly
+to GitHub Releases; neither workflow uploads Actions artifacts.
 """
 import re
 import unittest
@@ -12,15 +12,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORY = ROOT / ".github/workflows"
 RELEASE = DIRECTORY / "release.yml"
+PR_CI = DIRECTORY / "pr-ci.yml"
 
 
 class ManualReleaseOnlyTest(unittest.TestCase):
     def setUp(self):
         self.text = RELEASE.read_text(encoding="utf-8")
 
-    def test_exactly_one_workflow(self):
+    def test_only_pr_validation_and_manual_release_workflows(self):
         found = sorted(p.name for pattern in ("*.yml", "*.yaml") for p in DIRECTORY.glob(pattern))
-        self.assertEqual([RELEASE.name], found)
+        self.assertEqual(sorted([PR_CI.name, RELEASE.name]), found)
+
+    def test_pr_checks_validate_before_build_and_never_publish(self):
+        ci = PR_CI.read_text(encoding="utf-8")
+        self.assertIn("  pull_request:", ci)
+        self.assertIn("permissions:\n  contents: read", ci)
+        self.assertIn("python -m unittest discover -s tests -v", ci)
+        self.assertIn("python tools/gen_tables.py --check", ci)
+        self.assertIn("needs: tool-tests", ci)
+        for step in ("testReleaseUnitTest", "lintRelease", "assembleRelease"):
+            self.assertIn(step, ci)
+        self.assertLess(ci.index("testReleaseUnitTest"), ci.index("lintRelease"))
+        self.assertLess(ci.index("lintRelease"), ci.index("assembleRelease"))
+        for forbidden in ("secrets.", "gh release", "actions/upload-artifact"):
+            self.assertNotIn(forbidden, ci)
 
     def test_only_manual_dispatch_never_pr_push_or_schedule(self):
         self.assertRegex(self.text, r"(?m)^on:\s*$")

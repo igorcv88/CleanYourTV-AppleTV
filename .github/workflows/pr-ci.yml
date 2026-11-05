@@ -1,0 +1,55 @@
+name: Pull request checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tool-tests:
+    runs-on: ubuntu-latest
+    env:
+      CLEANYOURTV_STRICT: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install tooling dependencies
+        run: python -m pip install -r tools/requirements.txt
+      - name: Python regression tests
+        run: python -m unittest discover -s tests -v
+      - name: Generated tables must be current
+        run: python tools/gen_tables.py --check
+
+  launcher:
+    needs: tool-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install launcher Android SDK
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -print -quit)"
+          test -x "$SDKMANAGER"
+          "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Launcher unit tests
+        working-directory: launcher
+        run: bash ./gradlew --no-daemon testReleaseUnitTest
+      - name: Launcher Android lint
+        working-directory: launcher
+        run: bash ./gradlew --no-daemon lintRelease
+      - name: Compile launcher APK
+        working-directory: launcher
+        run: bash ./gradlew --no-daemon assembleRelease
+      - name: Check launcher APK size (16 MiB maximum)
+        run: |
+          apk="$(find launcher/app/build/outputs/apk/release -name '*.apk' -type f -print -quit)"
+          test -n "$apk"
+          test "$(stat -c %s "$apk")" -le 16777216
