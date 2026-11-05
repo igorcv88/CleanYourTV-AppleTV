@@ -44,6 +44,12 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
     private boolean preparedVideoOnly;
     private boolean preparing;
     private volatile boolean externalAudioPlaying;
+    /** Appearance > "Lighter glass with music" (opt-in): a smaller frost while music plays over the aerial. */
+    private static volatile boolean lightFrostWithMusic;
+
+    static void setLightFrostWithMusic(boolean value) {
+        lightFrostWithMusic = value;
+    }
     /** Spotify can briefly report no active session at a track boundary; do not revive audio then. */
     private static final long AUDIO_END_GRACE_MS = 3500L;
     /** Read by the background remux cancellation callback, mutated only on the main thread. */
@@ -68,7 +74,10 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
     /** Video-only remux copies encoded samples once; it never decodes or re-encodes the wallpaper. */
     private static final ExecutorService VIDEO_WORKER = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
+    /** The grace before "music ended" is running; repeated paused updates must not restart it. */
+    private boolean musicEndPending;
     private final Runnable musicEnded = () -> {
+        musicEndPending = false;
         externalAudioPlaying = false;
         // A remux may have been deferred while Spotify was playing; try again when the mixer is idle.
         if (!preparedVideoOnly) preparedFor = null;
@@ -263,11 +272,17 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
 
     /** A silent aerial may run beside Spotify; an unstrippable one must yield its audio track. */
     void setExternalAudioPlaying(boolean playing) {
-        main.removeCallbacks(musicEnded);
         if (!playing) {
-            if (externalAudioPlaying) main.postDelayed(musicEnded, AUDIO_END_GRACE_MS);
+            // Sessions report often while paused: restarting the grace on each report kept it from ever
+            // ending, so the aerial believed music played forever.
+            if (externalAudioPlaying && !musicEndPending) {
+                musicEndPending = true;
+                main.postDelayed(musicEnded, AUDIO_END_GRACE_MS);
+            }
             return;
         }
+        main.removeCallbacks(musicEnded);
+        musicEndPending = false;
         if (externalAudioPlaying) return;
         externalAudioPlaying = true;
         if (!ScenicAudioPolicy.allowAerial(true, preparedVideoOnly)) {
@@ -407,7 +422,7 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
             return;
         }
         // Twice the frost's size: Blur.Stream halves it with filtering (see Blur.MOTION_SIDE).
-        final boolean music = externalAudioPlaying;
+        final boolean music = lightFrostWithMusic && externalAudioPlaying;
         final int side = music ? Blur.MUSIC_SIDE : Blur.MOTION_SIDE;
         final int radius = music ? Blur.MUSIC_RADIUS : Blur.MOTION_RADIUS;
         float k = 2f * side / (float) Math.max(video.getWidth(), video.getHeight());

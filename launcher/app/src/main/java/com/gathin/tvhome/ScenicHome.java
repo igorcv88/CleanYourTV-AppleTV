@@ -77,6 +77,8 @@ import java.util.concurrent.Executors;
 final class ScenicHome implements NowPlaying.Listener {
     static final String PREFS = "scenic_home";
     static final String WALLPAPER_KEY = "wallpaper", GLASS_KEY = "glass";
+    /** Opt-in: while music plays over an aerial, a smaller (cheaper, more diffuse) live frost. */
+    static final String MUSIC_FROST_KEY = "light_frost_with_music";
     /** Keep silent aerials by default; album art is an opt-in playback backdrop. */
     static final String MUSIC_BACKDROP_KEY = "music_backdrop";
 
@@ -165,6 +167,8 @@ final class ScenicHome implements NowPlaying.Listener {
         Scene.reset();
         SceneGlassDrawable.setFrosted("frosted".equals(activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getString(GLASS_KEY, "clear")));
+        AerialBackdrop.setLightFrostWithMusic(activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(MUSIC_FROST_KEY, false));
         weather = new Weather(activity);
         nowPlaying = new NowPlaying(activity, this);
 
@@ -2256,6 +2260,11 @@ final class ScenicHome implements NowPlaying.Listener {
         String glass = prefs().getString(GLASS_KEY, "clear");
         screenContent.addView(row("Glass", "clear".equals(glass) ? "Clear" : "Frosted", () -> {
             prefs().edit().putString(GLASS_KEY, "clear".equals(glass) ? "frosted" : "clear").apply();
+            a.recreate();
+        }));
+        boolean lightFrost = prefs().getBoolean(MUSIC_FROST_KEY, false);
+        screenContent.addView(row("Lighter glass with music", lightFrost ? "On" : "Off", () -> {
+            prefs().edit().putBoolean(MUSIC_FROST_KEY, !lightFrost).apply();
             a.recreate();
         }));
         screenContent.addView(row("Home layout", "Scenic Glass", () -> {
