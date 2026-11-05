@@ -16,7 +16,8 @@ foreach ($script in @('devices.ps1', 'interactive.ps1', 'setup.ps1')) {
 
 # The Setup ZIP ships multiple Windows consumers of tools/venv, including optional add-ons.
 # A persistent-only interpreter would make disable/restore/theme fail after a first install.
-$setupSource = Get-Content (Join-Path $PSScriptRoot '..\setup.ps1') -Raw
+$setupPath = Join-Path $PSScriptRoot '..\setup.ps1'
+$setupSource = Get-Content $setupPath -Raw
 Assert-Ctv ($setupSource.Contains('$venvDir = ''tools\venv''')) 'Setup provisions the ZIP-local Python environment'
 foreach ($consumer in @('tools\disable.ps1', 'tools\restore.ps1', 'tools\theme.ps1')) {
     $source = Get-Content (Join-Path $PSScriptRoot "..\..\$consumer") -Raw
