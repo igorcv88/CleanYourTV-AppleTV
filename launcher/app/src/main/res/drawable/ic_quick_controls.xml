@@ -2,10 +2,9 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp"
     android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="@android:color/transparent"
-        android:strokeColor="#FFFFFFFF" android:strokeWidth="1.9"
-        android:strokeLineCap="round"
-        android:pathData="M5,6 H19 M5,12 H19 M5,18 H19" />
+    <!-- Control Center's paired switches, matching the inspiration rather than an equalizer glyph. -->
     <path android:fillColor="#FFFFFFFF"
-        android:pathData="M8,3 a3,3 0,1 1,0,6 a3,3 0,1 1,0,-6 M16,9 a3,3 0,1 1,0,6 a3,3 0,1 1,0,-6 M10,15 a3,3 0,1 1,0,6 a3,3 0,1 1,0,-6" />
+        android:pathData="M5,5 H19 A3,3 0,0 1,19 11 H5 A3,3 0,0 1,5 5 Z M5,13 H19 A3,3 0,0 1,19 19 H5 A3,3 0,0 1,5 13 Z" />
+    <path android:fillColor="#FF092039"
+        android:pathData="M8,6 a2,2 0,1 0,0 4 a2,2 0,1 0,0 -4 M16,14 a2,2 0,1 0,0 4 a2,2 0,1 0,0 -4" />
 </vector>

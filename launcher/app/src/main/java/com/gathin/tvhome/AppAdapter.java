@@ -228,6 +228,14 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     /** The complete installed list also supplies Scenic's dock, even while its grid is filtered. */
     private final List<Entry> allItems = new ArrayList<>();
     private final Set<String> scenicDockPackages = new HashSet<>();
+    /** Replacement mode dims other grid tiles while the chosen candidate waits for a dock slot. */
+    private String scenicReplacementCandidate;
+
+    void setScenicReplacementCandidate(String pkg) {
+        if (java.util.Objects.equals(scenicReplacementCandidate, pkg)) return;
+        scenicReplacementCandidate = pkg;
+        if (scenicHome) notifyDataSetChanged();
+    }
 
     AppAdapter(Context ctx, TileListener listener, int dockSize, Config cfg) {
         this.ctx = ctx;
@@ -508,7 +516,10 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             return;
         }
         h.card.setVisibility(View.VISIBLE);
-        h.card.setFocusable(true);
+        h.itemView.setAlpha(scenicReplacementCandidate == null || scenicReplacementCandidate.equals(e.pkg) ? 1f : 0.28f);
+        h.card.setFocusable(scenicReplacementCandidate == null || scenicReplacementCandidate.equals(e.pkg));
+        h.card.setForeground(scenicReplacementCandidate != null && scenicReplacementCandidate.equals(e.pkg)
+                ? ctx.getDrawable(R.drawable.scenic_moving_ring) : null);
         h.name.setText(e.name);
         // The dock has no labels, unless always_show_names asks for them (DockDecoration then makes room in the band).
         // In a single row every tile is the dock's kind: the big title above names it.
@@ -543,7 +554,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             h.label.setText(e.label);
             h.label.setVisibility(uniformTiles ? View.GONE : View.VISIBLE);
         }
-        h.card.setOnClickListener(v -> launch(e));
+        h.card.setOnClickListener(v -> {
+            if (scenicReplacementCandidate == null) launch(e);
+        });
         h.card.setOnLongClickListener(v -> {
             if (tileMenu) {
                 int pos = h.getBindingAdapterPosition();
@@ -699,6 +712,12 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         for (int i = 0; i < items.size(); i++) {
             if (items.get(i).component.flattenToShortString().equals(key)) return i;
         }
+        return -1;
+    }
+
+    int positionOfPackage(String pkg) {
+        if (pkg == null) return -1;
+        for (int i = 0; i < items.size(); i++) if (pkg.equals(items.get(i).pkg)) return i;
         return -1;
     }
 

@@ -169,20 +169,40 @@ final class AerialDownloads {
 
     /** Removes an aerial and its aerials.json entry. */
     static void remove(Context ctx, Aerial a) {
+        removeFile(ctx, a.file);
+    }
+
+    /** Remove only a named video inside the launcher's own aerial directory, plus its derived silent cache. */
+    static boolean removeFile(Context ctx, String fileName) {
+        // Downloaded titles can contain non-ASCII letters; never accept separators or parent paths.
+        if (fileName == null || !fileName.matches("[\\p{L}\\p{N}_-]+\\.(mov|mp4|webm)")) return false;
+        if (fileName.equals(downloading)) return false;
         File d = dir(ctx);
-        if (d == null) return;
-        //noinspection ResultOfMethodCallIgnored
-        new File(d, a.file).delete();
+        if (d == null) return false;
+        File video = new File(d, fileName);
+        if (!video.isFile()) return false;
+        String prefix = "silent_" + Integer.toHexString(video.getAbsolutePath().hashCode()) + "_";
+        if (!video.delete()) return false;
+        File cacheRoot = ctx.getExternalCacheDir();
+        File cache = cacheRoot == null ? null : new File(cacheRoot, "aerial-video-only");
+        if (cache != null && cache.isDirectory()) {
+            File[] derived = cache.listFiles((folder, name) -> name.startsWith(prefix)
+                    && (name.endsWith(".mp4") || name.endsWith(".webm") || name.endsWith(".part")));
+            if (derived != null) for (File f : derived) { //noinspection ResultOfMethodCallIgnored
+                f.delete();
+            }
+        }
         try {
             JSONArray old = readIndex(d), keep = new JSONArray();
             for (int i = 0; i < old.length(); i++) {
                 JSONObject o = old.getJSONObject(i);
-                if (!a.file.equals(o.optString("file"))) keep.put(o);
+                if (!fileName.equals(o.optString("file"))) keep.put(o);
             }
             writeIndex(d, keep);
         } catch (Exception e) {
             Log.w(TAG, "index", e);
         }
+        return true;
     }
 
     // ---- Apple connection ---------------------------------------------------------------------

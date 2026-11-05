@@ -102,6 +102,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
 
     private static final int LAUNCHER_SETTINGS_REQUEST = 42;
+    private static final int SCENIC_BACKUP_CREATE = 6101, SCENIC_BACKUP_OPEN = 6102;
     /** Sent by QuickSettingsActivity: open Launcher settings from here so Home rebuilds when they close. */
     static final String ACTION_LAUNCHER_SETTINGS = "com.gathin.tvhome.action.LAUNCHER_SETTINGS";
     /** Sent by the "library" action word of app_keys: open the App library over Home (needs app_library). */
@@ -505,8 +506,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // black under it is a second full-screen fill on every frame for nothing. The starting window still uses
         // the theme's background, so launch looks the same.
         getWindow().setBackgroundDrawable(null);
-        wallpaperPlayer = new WallpaperPlayer(this, root, cfg,
-                cfg.scenicHome && ScenicWallpaperPlayer.selected(this));
+        // An older Scenic photo-gallery selection is retired; return to aerials without erasing photo files.
+        if (cfg.scenicHome) {
+            SharedPreferences scenicPrefs = getSharedPreferences(ScenicHome.PREFS, MODE_PRIVATE);
+            if ("gallery".equals(scenicPrefs.getString(ScenicHome.WALLPAPER_KEY, "auto"))) {
+                scenicPrefs.edit().putString(ScenicHome.WALLPAPER_KEY, "auto")
+                        .remove("wallpaper_group").remove("wallpaper_fixed")
+                        .remove("wallpaper_minutes").remove("wallpaper_changed").apply();
+            }
+        }
+        wallpaperPlayer = new WallpaperPlayer(this, root, cfg, false);
         if (cfg.scenicHome) {
             String scenicBackground = getSharedPreferences(ScenicHome.PREFS, MODE_PRIVATE)
                     .getString(ScenicHome.WALLPAPER_KEY, "auto");
@@ -986,10 +995,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             glass.setVisibility(View.GONE);
             hero.setVisibility(View.GONE);
             if (racePanel != null) racePanel.setVisibility(View.GONE);
-            boolean useStill = scenicAerial == null && cfg.wallpapers.isEmpty()
-                    && !ScenicWallpaperPlayer.selected(this);
+            boolean useStill = scenicAerial == null && cfg.wallpapers.isEmpty();
             scenic = new ScenicHome(this, root, cfg, useStill, root.indexOfChild(ambient));
-            if (scenicAerial == null && !cfg.wallpapers.isEmpty() && !ScenicWallpaperPlayer.selected(this))
+            if (scenicAerial == null && !cfg.wallpapers.isEmpty())
                 scenic.useWallpaperScene(cfg.wallpapers.get(0));
             scenic.onAppsChanged(adapter.entries());
             grid.post(scenic::focusHome);
@@ -1026,6 +1034,23 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     List<AppAdapter.Entry> allEntries() { return adapter.entries(); }
     /** The Scenic dock remains backed by every installed app; only its separate grid omits dock favourites. */
     void setScenicDockPackages(List<String> packages) { adapter.setScenicDockPackages(packages); }
+    void setScenicReplacementCandidate(String pkg) { adapter.setScenicReplacementCandidate(pkg); }
+    void focusScenicGridPackage(String pkg) {
+        int position = adapter.positionOfPackage(pkg);
+        if (position >= 0) focusGridAt(position);
+    }
+
+    /** Storage Access Framework: Drive is available when the TV's document picker exposes it. */
+    void scenicBackupDocument(boolean restore) {
+        Intent intent = new Intent(restore ? Intent.ACTION_OPEN_DOCUMENT : Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType("application/json");
+        if (!restore) intent.putExtra(Intent.EXTRA_TITLE, "scenic-backup.json");
+        try {
+            startActivityForResult(intent, restore ? SCENIC_BACKUP_OPEN : SCENIC_BACKUP_CREATE);
+        } catch (ActivityNotFoundException | SecurityException unavailable) {
+            Toast.makeText(this, R.string.scenic_backup_picker_missing, Toast.LENGTH_LONG).show();
+        }
+    }
     boolean hasScenicGridItems() { return adapter.appCount() > 0 || adapter.isLibraryAt(0); }
     void playOpenSound() { if (scenicSound != null) scenicSound.onAppOpened(); }
     void playTick() { if (scenicSound != null) scenicSound.onFocusMoved(); }
@@ -1100,13 +1125,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (isFinishing() || isDestroyed()) return;
             if (available == null) {
                 Toast.makeText(this, R.string.aerials_offline, Toast.LENGTH_LONG).show();
+                showDownloadedAerials();
                 return;
             }
-            String[] names = new String[available.size()];
-            for (int i = 0; i < names.length; i++) names[i] = available.get(i).title;
+            String[] names = new String[available.size() + 1];
+            names[0] = getString(R.string.aerials_manage_downloaded);
+            for (int i = 0; i < available.size(); i++) names[i + 1] = available.get(i).title
+                    + (AerialDownloads.onTv(this, available.get(i)) ? " ✓" : "");
             new android.app.AlertDialog.Builder(this).setTitle(R.string.aerials_download)
                     .setItems(names, (dialog, which) -> {
-                        AerialDownloads.Aerial selection = available.get(which);
+                        if (which == 0) { showDownloadedAerials(); return; }
+                        AerialDownloads.Aerial selection = available.get(which - 1);
                         if (AerialDownloads.onTv(this, selection)) {
                             AerialBackdrop.choose(this, selection.file);
                             recreate();
@@ -1121,6 +1150,78 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                         }
                     }).setNegativeButton(android.R.string.cancel, null).show();
         });
+    }
+
+    /** Works offline and lists the actual TV files, including aerials installed before Apple's catalog support. */
+    void showDownloadedAerials() {
+        List<String[]> installed = AerialBackdrop.catalog(this);
+        if (installed.isEmpty()) {
+            new android.app.AlertDialog.Builder(this).setTitle(R.string.aerials_manage_downloaded)
+                    .setMessage(R.string.aerials_none_downloaded)
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+        File folder = AerialDownloads.dir(this);
+        String[] names = new String[installed.size()];
+        for (int i = 0; i < installed.size(); i++) {
+            String[] entry = installed.get(i);
+            File f = new File(folder, entry[0]);
+            names[i] = entry[1] + " · " + ((f.length() + 1048575L) / 1048576L) + " MiB";
+        }
+        new android.app.AlertDialog.Builder(this).setTitle(R.string.aerials_manage_downloaded)
+                .setItems(names, (dialog, which) -> {
+                    String[] selected = installed.get(which);
+                    new android.app.AlertDialog.Builder(this)
+                            .setTitle(R.string.aerials_confirm_remove_title)
+                            .setMessage(getString(R.string.aerials_confirm_remove, names[which]))
+                            .setPositiveButton(R.string.aerials_delete, (confirm, choice) -> {
+                                if (!AerialDownloads.removeFile(this, selected[0])) {
+                                    Toast.makeText(this, R.string.aerials_remove_failed, Toast.LENGTH_LONG).show();
+                                    return;
+                                }
+                                Toast.makeText(this, getString(R.string.aerials_removed, selected[1]), Toast.LENGTH_LONG).show();
+                                if (selected[0].equals(AerialBackdrop.chosen(this, ""))) {
+                                    AerialBackdrop.choose(this, AerialBackdrop.CYCLE);
+                                }
+                                // Recreate so the video decoder no longer holds a deleted file open.
+                                recreate();
+                            })
+                            .setNegativeButton(android.R.string.cancel, (cancel, unused) -> showDownloadedAerials())
+                            .show();
+                }).setNegativeButton(android.R.string.cancel, null).show();
+    }
+
+    /** Only the files written by the now-retired 4K photo collections, never the user's theme wallpapers. */
+    private File[] legacyScenicPhotoFiles() {
+        File folder = getExternalFilesDir("scenic_wallpapers");
+        if (folder == null) folder = new File(getFilesDir(), "scenic_wallpapers");
+        File[] files = folder.listFiles((d, name) ->
+                name.matches("[a-z_]+_[0-9]+\\.jpg") || name.matches("[a-z_]+\\.json"));
+        return files == null ? new File[0] : files;
+    }
+
+    long legacyScenicPhotoBytes() {
+        long bytes = 0;
+        for (File f : legacyScenicPhotoFiles()) bytes += f.length();
+        return bytes;
+    }
+
+    void offerLegacyScenicPhotoCleanup() {
+        File[] files = legacyScenicPhotoFiles();
+        if (files.length == 0) return;
+        long bytes = 0;
+        for (File f : files) bytes += f.length();
+        long mib = (bytes + 1048575L) / 1048576L;
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.scenic_legacy_photos_cleanup)
+                .setMessage(getString(R.string.scenic_legacy_photos_confirm, mib))
+                .setPositiveButton(R.string.scenic_legacy_photos_cleanup, (dialog, which) -> {
+                    boolean allRemoved = true;
+                    for (File f : files) if (!f.delete()) allRemoved = false;
+                    if (!allRemoved) Toast.makeText(this, R.string.scenic_legacy_photos_failed, Toast.LENGTH_LONG).show();
+                    recreate();
+                })
+                .setNegativeButton(android.R.string.cancel, null).show();
     }
 
     /**
@@ -1319,6 +1420,41 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if ((requestCode == SCENIC_BACKUP_CREATE || requestCode == SCENIC_BACKUP_OPEN)
+                && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            Uri document = data.getData();
+            if (requestCode == SCENIC_BACKUP_CREATE) {
+                try (java.io.OutputStream stream = getContentResolver().openOutputStream(document, "wt")) {
+                    if (stream == null) throw new java.io.IOException("No document writer");
+                    stream.write(ScenicBackup.encode(this).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    Toast.makeText(this, R.string.scenic_backup_saved, Toast.LENGTH_LONG).show();
+                } catch (Exception error) {
+                    Toast.makeText(this, R.string.scenic_backup_failed, Toast.LENGTH_LONG).show();
+                }
+            } else {
+                new android.app.AlertDialog.Builder(this)
+                        .setTitle(R.string.scenic_backup_restore)
+                        .setMessage(R.string.scenic_backup_confirm)
+                        .setPositiveButton(R.string.scenic_backup_restore, (dialog, which) -> {
+                            try (java.io.InputStream stream = getContentResolver().openInputStream(document)) {
+                                if (stream == null) throw new java.io.IOException("No document reader");
+                                java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+                                byte[] chunk = new byte[4096];
+                                int n;
+                                while ((n = stream.read(chunk)) != -1) {
+                                    if (bytes.size() + n > 131072) throw new java.io.IOException("Backup too large");
+                                    bytes.write(chunk, 0, n);
+                                }
+                                ScenicBackup.restore(this, bytes.toString("UTF-8"));
+                                Toast.makeText(this, R.string.scenic_backup_restored, Toast.LENGTH_LONG).show();
+                                recreate();
+                            } catch (Exception error) {
+                                Toast.makeText(this, R.string.scenic_backup_failed, Toast.LENGTH_LONG).show();
+                            }
+                        }).setNegativeButton(android.R.string.cancel, null).show();
+            }
+            return;
+        }
         if (requestCode == LAUNCHER_SETTINGS_REQUEST && resultCode == RESULT_OK
                 && data != null && data.getBooleanExtra(LauncherSettingsActivity.EXTRA_REORDER, false)) {
             getIntent().putExtra(LauncherSettingsActivity.EXTRA_REORDER, true);

@@ -49,7 +49,6 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.File;
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -76,6 +75,7 @@ import java.util.concurrent.Executors;
  */
 final class ScenicHome implements NowPlaying.Listener {
     static final String PREFS = "scenic_home";
+    static final String SHOW_ALL_APPS_DOCK_KEY = "show_all_apps_dock";
     static final String WALLPAPER_KEY = "wallpaper", GLASS_KEY = "glass";
     /** Opt-in: while music plays over an aerial, a smaller (cheaper, more diffuse) live frost. */
     static final String MUSIC_FROST_KEY = "light_frost_with_music";
@@ -113,7 +113,6 @@ final class ScenicHome implements NowPlaying.Listener {
     private final SceneGlassDrawable appsFrost;
     private final GradientDrawable appsShade;
     private ImageView still;
-    private final ScenicWallpaperPlayer wallpaperGallery;
 
     private FrameLayout listenLayer;
     private ImageView bigArt;
@@ -155,6 +154,7 @@ final class ScenicHome implements NowPlaying.Listener {
     private List<String> favourites;
     private final Map<String, AppAdapter.Entry> byPkg = new HashMap<>();
     private String movingPkg;
+    private String replacingPkg;
     private int lastDockPos;
     private PopupWindow menu;
 
@@ -185,8 +185,6 @@ final class ScenicHome implements NowPlaying.Listener {
         wash.setVisibility(View.GONE);
         wash.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         root.addView(wash, Math.max(0, Math.min(washIndex, root.getChildCount())), full());
-        wallpaperGallery = ScenicWallpaperPlayer.selected(a)
-                ? new ScenicWallpaperPlayer(a, root, root.indexOfChild(wash)) : null;
         // Under All Apps: over a moving aerial, a full-screen veil of the same frosted glass, so the names
         // read over the flight; over the album wash (already blurred) only a gentle shade.
         dim = new View(activity);
@@ -378,7 +376,6 @@ final class ScenicHome implements NowPlaying.Listener {
 
     void resume() {
         resumed = true;
-        if (wallpaperGallery != null) wallpaperGallery.start();
         nowPlaying.start();
         refreshWeather();
         startTick();
@@ -386,7 +383,6 @@ final class ScenicHome implements NowPlaying.Listener {
 
     void pause() {
         resumed = false;
-        if (wallpaperGallery != null) wallpaperGallery.pause();
         nowPlaying.stop();
         handler.removeCallbacks(tick);
         if (menu != null) menu.dismiss();
@@ -396,7 +392,6 @@ final class ScenicHome implements NowPlaying.Listener {
     void release() {
         released = true;
         nowPlaying.release();
-        if (wallpaperGallery != null) wallpaperGallery.close();
         worker.shutdownNow();
         Scene.reset();
     }
@@ -450,8 +445,9 @@ final class ScenicHome implements NowPlaying.Listener {
                 installed.add(e.pkg);
             }
         }
-        favourites = Favorites.effective(Favorites.load(a), cfg.dockApps, installed, 6);
-        List<String> visibleDock = Favorites.visible(favourites, byPkg.keySet());
+        favourites = Favorites.effective(Favorites.load(a), cfg.dockApps, installed,
+                ScenicDockRules.capacity(cfg.columns));
+        List<String> visibleDock = ScenicDockRules.takeVisible(Favorites.visible(favourites, byPkg.keySet()), dockCapacity());
         List<AppAdapter.Entry> shown = new ArrayList<>();
         for (String p : visibleDock) shown.add(byPkg.get(p));
         boolean hadFocus = dock.hasFocus();
@@ -463,6 +459,21 @@ final class ScenicHome implements NowPlaying.Listener {
     boolean toggleFavourite(AppAdapter.Entry e) {
         if (favourites == null) return false;
         boolean adding = !favourites.contains(e.pkg);
+        if (adding && ScenicDockRules.needsReplacement(
+                Favorites.visible(favourites, byPkg.keySet()), e.pkg, dockCapacity())) {
+            // Search and Discover also expose long-press Add to Dock. Their screen layer traps
+            // D-pad focus, so move into the expanded All Apps layout before picking a slot.
+            // Back then returns to the original app, still highlighted in the grid.
+            if (screen.getVisibility() == View.VISIBLE && screens.depth() > 0) {
+                closeScreenNow();
+                showApps(true, false);
+            }
+            replacingPkg = e.pkg;
+            a.setScenicReplacementCandidate(e.pkg);
+            Toast.makeText(a, a.getString(R.string.scenic_replace_choose, e.label), Toast.LENGTH_LONG).show();
+            handler.post(() -> focusDock(Math.min(lastDockPos, dockAdapter.favouriteCount() - 1)));
+            return true;
+        }
         favourites = Favorites.toggle(favourites, e.pkg);
         Favorites.save(a, favourites);
         rebuildShelf();
@@ -471,11 +482,37 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void rebuildShelf() {
-        List<String> visibleDock = Favorites.visible(favourites, byPkg.keySet());
+        List<String> visibleDock = ScenicDockRules.takeVisible(Favorites.visible(favourites, byPkg.keySet()), dockCapacity());
         List<AppAdapter.Entry> shown = new ArrayList<>();
         for (String p : visibleDock) shown.add(byPkg.get(p));
         dockAdapter.set(shown);
         a.setScenicDockPackages(visibleDock);
+    }
+
+    private int dockCapacity() { return ScenicDockRules.capacity(cfg.columns); }
+
+    private boolean showAllAppsDock() { return prefs().getBoolean(SHOW_ALL_APPS_DOCK_KEY, true); }
+
+    private void finishReplace(String oldPkg) {
+        if (replacingPkg == null) return;
+        String newPkg = replacingPkg;
+        favourites = ScenicDockRules.replace(favourites, oldPkg, newPkg);
+        Favorites.save(a, favourites);
+        cancelReplace();
+        rebuildShelf();
+        Toast.makeText(a, a.getString(R.string.scenic_replaced, byPkg.get(newPkg).label), Toast.LENGTH_SHORT).show();
+        handler.post(() -> focusDock(dockAdapter.indexOf(newPkg)));
+    }
+
+    private void cancelReplace() {
+        replacingPkg = null;
+        a.setScenicReplacementCandidate(null);
+    }
+
+    private void cancelReplaceAndReturn() {
+        String previous = replacingPkg;
+        cancelReplace();
+        if (appsShown) a.focusScenicGridPackage(previous);
     }
 
     private void focusDock(int pos) {
@@ -598,11 +635,11 @@ final class ScenicHome implements NowPlaying.Listener {
         }
 
         @Override public long getItemId(int pos) {
-            return DockNav.isAllApps(pos, items.size()) ? Long.MAX_VALUE : items.get(pos).pkg.hashCode();
+            return showAllAppsDock() && DockNav.isAllApps(pos, items.size()) ? Long.MAX_VALUE : items.get(pos).pkg.hashCode();
         }
 
         @Override public int getItemCount() {
-            return DockNav.count(items.size());
+            return items.size() + (showAllAppsDock() ? 1 : 0);
         }
 
         @NonNull @Override
@@ -618,7 +655,7 @@ final class ScenicHome implements NowPlaying.Listener {
 
         @Override
         public void onBindViewHolder(@NonNull Holder h, int pos) {
-            boolean allApps = DockNav.isAllApps(pos, items.size());
+            boolean allApps = showAllAppsDock() && DockNav.isAllApps(pos, items.size());
             h.card.setContentDescription(allApps ? a.getString(R.string.scenic_all_apps) : items.get(pos).label);
             if (allApps) {
                 // A control, not an app: frosted glass, the grid icon and its caption.
@@ -672,7 +709,11 @@ final class ScenicHome implements NowPlaying.Listener {
                     int pos = getBindingAdapterPosition();
                     if (pos == RecyclerView.NO_POSITION) return;
                     if (movingPkg != null) { endMove(); return; }
-                    if (DockNav.isAllApps(pos, items.size())) {
+                    if (replacingPkg != null) {
+                        if (pos < items.size()) finishReplace(items.get(pos).pkg);
+                        return;
+                    }
+                    if (showAllAppsDock() && DockNav.isAllApps(pos, items.size())) {
                         a.playOpenSound();
                         showApps(true, true);
                     } else {
@@ -681,7 +722,8 @@ final class ScenicHome implements NowPlaying.Listener {
                 });
                 card.setOnLongClickListener(x -> {
                     int pos = getBindingAdapterPosition();
-                    if (pos == RecyclerView.NO_POSITION || DockNav.isAllApps(pos, items.size())) return false;
+                    if (pos == RecyclerView.NO_POSITION || replacingPkg != null
+                            || (showAllAppsDock() && DockNav.isAllApps(pos, items.size()))) return false;
                     showDockMenu(card, items.get(pos));
                     return true;
                 });
@@ -700,6 +742,10 @@ final class ScenicHome implements NowPlaying.Listener {
                     int pos = getBindingAdapterPosition();
                     if (pos == RecyclerView.NO_POSITION) return false;
                     boolean left = code == KeyEvent.KEYCODE_DPAD_LEFT, rightKey = code == KeyEvent.KEYCODE_DPAD_RIGHT;
+                    if (replacingPkg != null) {
+                        if (code == KeyEvent.KEYCODE_BACK) { cancelReplaceAndReturn(); return true; }
+                        return code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN;
+                    }
                     if (movingPkg != null) {
                         if (left || rightKey) {
                             moveFavourite(left ? -1 : 1);
@@ -719,7 +765,7 @@ final class ScenicHome implements NowPlaying.Listener {
                             return false;
                         }
                     }
-                    if (code == KeyEvent.KEYCODE_MENU && !DockNav.isAllApps(pos, items.size())) {
+                    if (code == KeyEvent.KEYCODE_MENU && !(showAllAppsDock() && DockNav.isAllApps(pos, items.size()))) {
                         showDockMenu(card, items.get(pos));
                         return true;
                     }
@@ -802,6 +848,8 @@ final class ScenicHome implements NowPlaying.Listener {
         if (ev.getAction() != KeyEvent.ACTION_DOWN) return false;
         int code = ev.getKeyCode();
         View f = a.getCurrentFocus();
+        if (replacingPkg != null && isInside(f, dock)
+                && (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN)) return true;
         if (listening) return listenKey(f, code);
         if (controlCenter != null && controlCenter.isOpen()) {
             if (!isDpad(code)) return false;
@@ -970,6 +1018,7 @@ final class ScenicHome implements NowPlaying.Listener {
     /** Back: the top overlay closes and gives focus back. False when Home has nothing open. */
     boolean onBack() {
         if (menu != null) { menu.dismiss(); return true; }
+        if (replacingPkg != null) { cancelReplaceAndReturn(); return true; }
         if (controlCenter != null && controlCenter.isOpen()) { closeControlCenter(); return true; }
         if (movingPkg != null) { endMove(); return true; }
         if (listening) { closeListen(); return true; }
@@ -988,6 +1037,7 @@ final class ScenicHome implements NowPlaying.Listener {
         if (menu != null) menu.dismiss();
         if (controlCenter != null) controlCenter.close(false);
         endMove();
+        cancelReplace();
         if (listening) {
             if (listenAnim != null) listenAnim.cancel();
             finishListenClose();
@@ -1487,7 +1537,7 @@ final class ScenicHome implements NowPlaying.Listener {
 
     private void buildControlCenter() {
         controlCenter = new ControlCenter(a, layer, regular, medium, reducedMotion, new ControlCenter.Actions() {
-            @Override public void network() { quickAction(a::openNetworkSettings); }
+            @Override public void network() { quickAction(ScenicHome.this::openQuickNetwork); }
             @Override public void sound() { quickAction(() -> a.openIntent(new Intent(Settings.ACTION_SOUND_SETTINGS))); }
             @Override public boolean hasInputs() { return a.hasInputs(); }
             @Override public void inputs() { quickAction(a::showInputsMenu); }
@@ -1499,13 +1549,37 @@ final class ScenicHome implements NowPlaying.Listener {
                 });
             }
             @Override public void tvSettings() { quickAction(a::openTvSettings); }
-            @Override public void listen() { quickAction(ScenicHome.this::openListen); }
+            @Override public void listen() { quickAction(ScenicHome.this::openCurrentMediaApp); }
             @Override public void musicAccess() { quickAction(ScenicHome.this::openMusicAccess); }
             // Transport keeps the sheet open: the same session commands as the Home buttons.
             @Override public void previous() { nowPlaying.previous(); }
             @Override public void togglePlay() { nowPlaying.togglePlay(); }
             @Override public void next() { nowPlaying.next(); }
         });
+    }
+
+    /** The Control Center's full media card opens the owning app; Home's Listen action is separate. */
+    private void openCurrentMediaApp() {
+        if (track == null || track.pkg == null) { openMusicAccess(); return; }
+        AppAdapter.Entry entry = byPkg.get(track.pkg);
+        if (entry != null) { launch(entry); return; }
+        Intent i = a.getPackageManager().getLeanbackLaunchIntentForPackage(track.pkg);
+        if (i == null) i = a.getPackageManager().getLaunchIntentForPackage(track.pkg);
+        if (i != null) a.openIntent(i);
+        else openListen();
+    }
+
+    /** Read-only connectivity page, with a real system Wi-Fi management action on unprivileged TVs. */
+    private void openQuickNetwork() {
+        openScreen(a.getString(R.string.scenic_network), this::openQuickNetwork);
+        NetworkSummary state = networkSummary();
+        heading("Connection");
+        note(state.title + " · " + state.detail);
+        note("Wi-Fi power and joining networks require TV system permissions. "
+                + "Use the device's network controls to connect or disconnect.");
+        screenContent.addView(row("Manage Wi-Fi networks", null,
+                () -> { closeScreenNow(); a.openNetworkSettings(); }));
+        focusFirstRow();
     }
 
     /** Only while the sheet is open; opening it syncs first. */
@@ -1527,10 +1601,36 @@ final class ScenicHome implements NowPlaying.Listener {
         if (controlCenter.isOpen()) { closeControlCenter(); return; }
         focusMemory.push("quick", a.getCurrentFocus());
         controlCenter.setNetwork(networkSummary());
+        controlCenter.setSoundOutput(soundOutputLabel());
         controlCenter.setFooter(controlCenterFooter());
         controlCenter.open();
         syncControlCenterMedia();
         a.playOpenSound();
+    }
+
+    /** Best available connected output label; routing decisions remain the TV's responsibility. */
+    private String soundOutputLabel() {
+        android.media.AudioManager audio = a.getSystemService(android.media.AudioManager.class);
+        if (audio == null) return "TV audio";
+        android.media.AudioDeviceInfo[] devices = audio.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS);
+        String output = "TV speakers";
+        for (android.media.AudioDeviceInfo device : devices) {
+            switch (device.getType()) {
+                case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP:
+                case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO:
+                    return device.getProductName() == null ? "Bluetooth audio" : device.getProductName().toString();
+                case android.media.AudioDeviceInfo.TYPE_HDMI_ARC:
+                case android.media.AudioDeviceInfo.TYPE_HDMI_EARC:
+                    output = "HDMI audio";
+                    break;
+                case android.media.AudioDeviceInfo.TYPE_HDMI:
+                    output = "HDMI output";
+                    break;
+                default:
+                    break;
+            }
+        }
+        return output;
     }
 
     private void closeControlCenter() {
@@ -1987,7 +2087,12 @@ final class ScenicHome implements NowPlaying.Listener {
             p.edit().putString(WALLPAPER_KEY, "still").apply();
             a.recreate();
         }));
-        if (aerials) screenContent.addView(row("Download more aerials", null, () -> { closeScreenNow(); a.showAerialDownloads(); }));
+        screenContent.addView(row("Download Apple aerials", null, () -> { closeScreenNow(); a.showAerialDownloads(); }));
+        screenContent.addView(row("Manage downloaded aerial videos", null,
+                () -> { closeScreenNow(); a.showDownloadedAerials(); }));
+        if (a.legacyScenicPhotoBytes() > 0) screenContent.addView(row(
+                a.getString(R.string.scenic_legacy_photos_cleanup), null, a::offerLegacyScenicPhotoCleanup));
+        screenContent.addView(row("Brazil · drone videos", null, this::openBrazilVideos));
         heading("Background while music plays");
         String musicBackdrop = p.getString(MUSIC_BACKDROP_KEY, "aerial");
         screenContent.addView(choiceRow("Keep the aerial video", "Default",
@@ -1998,32 +2103,6 @@ final class ScenicHome implements NowPlaying.Listener {
                 + "If the TV cannot isolate the video, album artwork replaces it automatically during music "
                 + "to protect Spotify's mixing effects. You can also choose artwork all the time to reduce "
                 + "video decoding. Pausing music returns to the selected wallpaper.");
-        heading("Scenic photo collections");
-        String selectedGroup = p.getString(ScenicWallpaperPlayer.GROUP, "all");
-        screenContent.addView(choiceRow("All collections · Shuffle", "HD & downloaded 4K",
-                "gallery".equals(choice) && "all".equals(selectedGroup), () -> selectWallpaperGroup("all", "")));
-        for (ScenicWallpaperCatalog.Group group : ScenicWallpaperCatalog.GROUPS) {
-            int count = ScenicWallpaperPlayer.items(a, group.id).size();
-            screenContent.addView(row(group.label, count + " available" +
-                    ("gallery".equals(choice) && group.id.equals(selectedGroup) ? " · ✓" : ""),
-                    () -> openWallpaperGroup(group)));
-        }
-        screenContent.addView(row("Brazil · cities & landscapes", "7 regions", this::openBrazilWallpapers));
-        int minutes = p.getInt(ScenicWallpaperPlayer.MINUTES, 10);
-        screenContent.addView(row("Photo rotation", minutes + " min", () -> {
-            int next = ScenicWallpaperPlayer.ROTATION_MINUTES[0];
-            for (int i = 0; i < ScenicWallpaperPlayer.ROTATION_MINUTES.length; i++) {
-                if (minutes == ScenicWallpaperPlayer.ROTATION_MINUTES[i]) {
-                    next = ScenicWallpaperPlayer.ROTATION_MINUTES[(i + 1) % ScenicWallpaperPlayer.ROTATION_MINUTES.length];
-                    break;
-                }
-            }
-            p.edit().putInt(ScenicWallpaperPlayer.MINUTES, next).apply();
-            openWallpapers();
-        }));
-        note("Photos are included with the original CleanYourTV themes and work offline. Each group can rotate, "
-                + "or you can pin one photo. Optional Wikimedia Commons 4K downloads are saved on the TV, "
-                + "with the author and licence listed for every download. Aerial videos are separate.");
         focusFirstRow();
     }
 
@@ -2032,20 +2111,6 @@ final class ScenicHome implements NowPlaying.Listener {
         // Re-evaluate the active session immediately; no launcher restart or audio interruption.
         if (track != null) onNowPlaying(track);
         openWallpapers();
-    }
-
-    private void openBrazilWallpapers() {
-        openScreen("Brazil · aerial landscapes", this::openBrazilWallpapers);
-        note("Select a city or state, then find 4K aerial photos on Wikimedia Commons. Downloads are optional "
-                + "and rotate as a group. The collection grows as you add photos; images are never downloaded "
-                + "automatically on mobile data or at startup.");
-        screenContent.addView(row("Brazil · moving aerial videos", "Download on demand", this::openBrazilVideos));
-        heading("Brazil · 4K photo collections");
-        for (ScenicWallpaperCatalog.Group group : ScenicWallpaperCatalog.BRAZIL) {
-            int count = ScenicWallpaperPlayer.items(a, group.id).size();
-            screenContent.addView(row(group.label, count + " downloaded", () -> openWallpaperGroup(group)));
-        }
-        focusFirstRow();
     }
 
     private void openBrazilVideos() {
@@ -2065,9 +2130,9 @@ final class ScenicHome implements NowPlaying.Listener {
         screenContent.addView(row("Explore videos from Minas Gerais", null, () -> openBrazilVideoSources("minas")));
         screenContent.addView(row("Video credits & licences", null, this::openBrazilVideoCredits));
         note("The Wikimedia Commons drone video collection currently has limited cities. Salvador has a 4K "
-                + "clip, but footage from every Brazilian capital is not available. For Fortaleza, Rio and other "
-                + "regions, the 4K aerial photo collections above offer a larger selection. WebM playback also "
-                + "depends on the TV's video decoder.");
+                + "clip, but footage from every Brazilian capital is not available. "
+                + "WebM playback depends on the TV's video decoder. Remove downloaded clips under Wallpapers "
+                + "→ Manage downloaded aerial videos.");
         heading("Downloaded on this TV");
         for (String[] video : installed) {
             if (!video[0].startsWith("br_")) continue;
@@ -2166,136 +2231,6 @@ final class ScenicHome implements NowPlaying.Listener {
         });
     }
 
-    private void selectWallpaperGroup(String group, String fixed) {
-        prefs().edit().putString(WALLPAPER_KEY, ScenicWallpaperPlayer.MODE)
-                .putString(ScenicWallpaperPlayer.GROUP, group)
-                .putString(ScenicWallpaperPlayer.FIXED, fixed)
-                .remove(ScenicWallpaperPlayer.CHANGED).apply();
-        a.recreate();
-    }
-
-    private void openWallpaperGroup(ScenicWallpaperCatalog.Group group) {
-        openScreen(group.label, () -> openWallpaperGroup(group));
-        List<ScenicWallpaperCatalog.Item> photos = ScenicWallpaperPlayer.items(a, group.id);
-        screenContent.addView(row("Use collection · Shuffle", photos.isEmpty() ? "Download photos first" : photos.size() + " photos", () -> {
-            if (photos.isEmpty()) {
-                Toast.makeText(a, "Download at least one photo first", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            selectWallpaperGroup(group.id, "");
-        }));
-        screenContent.addView(row("Explore & download 4K", "Wikimedia Commons", () -> openCommonsGroup(group)));
-        screenContent.addView(row("Photo credits & licences", null, () -> openPhotoCredits(group)));
-        heading("Photos · choose to pin");
-        for (ScenicWallpaperCatalog.Item photo : photos) {
-            View item = wallpaperRow(photo, () -> selectWallpaperGroup(group.id, photo.id));
-            screenContent.addView(item);
-        }
-        if (photos.isEmpty()) note("No photos are bundled in this group. Explore Wikimedia Commons and download a "
-                + "4K photo to enable it. Photos are downloaded only when you select them.");
-        note("Downloaded photos are stored in this launcher's files, not in the APK. Their names, credits and "
-                + "licences are kept with them, and the file can be removed from the TV's storage settings.");
-        focusFirstRow();
-    }
-
-    private void openPhotoCredits(ScenicWallpaperCatalog.Group group) {
-        openScreen("Credits · " + group.label, () -> openPhotoCredits(group));
-        int n = 0;
-        for (ScenicWallpaperCatalog.Item photo : ScenicWallpaperPlayer.items(a, group.id)) {
-            if (photo.file == null) continue;
-            heading(photo.name);
-            note(photo.credit + "\n" + photo.source);
-            n++;
-        }
-        if (n == 0) note("This group currently uses the photos included with the original CleanYourTV themes. "
-                + "No Wikimedia Commons photos have been downloaded yet.");
-        screenContent.addView(row("Back to " + group.label, null, () -> openWallpaperGroup(group)));
-        focusFirstRow();
-    }
-
-    private void openCommonsGroup(ScenicWallpaperCatalog.Group group) {
-        openScreen("4K · " + group.label, () -> openCommonsGroup(group));
-        note("Searching Wikimedia Commons for landscape photos at least 3840 × 2160. Files are optional downloads; "
-                + "authors and licences remain available in this gallery. This may take a few seconds.");
-        int generation = screenToken;
-        worker.execute(() -> {
-            List<CommonsWallpapers.Photo> found = null;
-            String error = null;
-            try { found = CommonsWallpapers.search(group); }
-            catch (Exception e) { error = e.getMessage(); }
-            final List<CommonsWallpapers.Photo> results = found;
-            final String failure = error;
-            handler.post(() -> {
-                if (released || generation != screenToken) return;
-                screenContent.removeAllViews();
-                if (failure != null) {
-                    note("The 4K gallery is unavailable: " + failure + ". Built-in photos still work offline.");
-                } else if (results == null || results.isEmpty()) {
-                    note("No licensed landscape 4K photos matched this group. Try another group or try again later.");
-                } else {
-                    heading("4K photos · download on OK");
-                    for (CommonsWallpapers.Photo photo : results) {
-                        View item = row(photo.name, photo.width + "×" + photo.height, () -> downloadCommonsPhoto(group, photo));
-                        screenContent.addView(item);
-                        item.setContentDescription(photo.name + ", " + photo.credit);
-                    }
-                    note("Photo credits and their original Wikimedia Commons pages are saved with each download. "
-                            + "No automatic download happens while browsing.");
-                }
-                screenContent.addView(row("Back to " + group.label, null, () -> openWallpaperGroup(group)));
-                focusFirstRow();
-            });
-        });
-    }
-
-    private void downloadCommonsPhoto(ScenicWallpaperCatalog.Group group, CommonsWallpapers.Photo photo) {
-        openScreen("Downloading 4K photo", null);
-        note(photo.name + "\n" + photo.credit + "\n" + photo.source);
-        note("Downloading and saving to this TV. Please wait…");
-        int generation = screenToken;
-        worker.execute(() -> {
-            String error = null;
-            try { CommonsWallpapers.save(a, group, photo); }
-            catch (Exception e) { error = e.getMessage(); }
-            String failure = error;
-            handler.post(() -> {
-                if (released || generation != screenToken) return;
-                if (failure == null) openWallpaperGroup(group);
-                else {
-                    note("Could not download: " + failure);
-                    screenContent.addView(row("Retry", null, () -> downloadCommonsPhoto(group, photo)));
-                    focusFirstRow();
-                }
-            });
-        });
-    }
-
-    private View wallpaperRow(ScenicWallpaperCatalog.Item photo, Runnable action) {
-        View r = row(photo.name, photo.asset == null ? "4K" : "HD", action);
-        ImageView thumb = new ImageView(a);
-        thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(90), dp(49));
-        lp.setMarginEnd(dp(16));
-        ((LinearLayout) r).addView(thumb, 0, lp);
-        r.getLayoutParams().height = dp(64);
-        int generation = screenToken;
-        worker.execute(() -> {
-            try {
-                BitmapFactory.Options o = new BitmapFactory.Options();
-                o.inSampleSize = 16;
-                Bitmap image;
-                if (photo.asset != null) {
-                    try (InputStream in = a.getAssets().open(photo.asset)) { image = BitmapFactory.decodeStream(in, null, o); }
-                } else image = BitmapFactory.decodeFile(photo.file, o);
-                handler.post(() -> {
-                    if (!released && generation == screenToken) thumb.setImageBitmap(image);
-                });
-            } catch (Exception | OutOfMemoryError ignored) { }
-        });
-        if (photo.asset == null) r.setContentDescription(photo.name + ". " + photo.credit + ". " + photo.source);
-        return r;
-    }
-
     private void openAppearance() {
         openScreen(a.getString(R.string.scenic_appearance), this::openAppearance);
         SharedPreferences choices = a.getSharedPreferences(Config.SETTINGS_NAME, Context.MODE_PRIVATE);
@@ -2312,6 +2247,15 @@ final class ScenicHome implements NowPlaying.Listener {
         screenContent.addView(row("Glass", "clear".equals(glass) ? "Clear" : "Frosted", () -> {
             prefs().edit().putString(GLASS_KEY, "clear".equals(glass) ? "frosted" : "clear").apply();
             a.recreate();
+        }));
+        screenContent.addView(row("All Apps button in Dock", showAllAppsDock() ? "On" : "Off", () -> {
+            if (showAllAppsDock() && dockAdapter.favouriteCount() == 0) {
+                Toast.makeText(a, R.string.scenic_hide_allapps_requires_favourite, Toast.LENGTH_LONG).show();
+                return;
+            }
+            prefs().edit().putBoolean(SHOW_ALL_APPS_DOCK_KEY, !showAllAppsDock()).apply();
+            dockAdapter.notifyDataSetChanged();
+            openAppearance();
         }));
         boolean lightFrost = prefs().getBoolean(MUSIC_FROST_KEY, false);
         screenContent.addView(row("Lighter glass with music", lightFrost ? "On" : "Off", () -> {
@@ -2401,10 +2345,17 @@ final class ScenicHome implements NowPlaying.Listener {
 
     private void openBackup() {
         openScreen(a.getString(R.string.scenic_backup), this::openBackup);
-        note("Dock favourites, My Space, weather place and Home choices are stored only on this TV (no account, no "
-                + "cloud), and are lost if the launcher's data is cleared.\n\nRecovery: the project's tools "
-                + "(tools/restore.sh, tools/recovery.py) re-enable the TV's own launcher over ADB if this Home ever "
-                + "fails; install a new build before removing anything, and keep the stock launcher installed.");
+        note("Export Dock favourites, My Space, weather and Home settings as a JSON document. "
+                + "Select Google Drive in your TV's file picker if available; that provider uses its own signed-in "
+                + "Google account. Some TV firmware has no document picker or Drive provider. "
+                + "No account details are read by Scenic.");
+        screenContent.addView(row(a.getString(R.string.scenic_backup_save), null,
+                () -> a.scenicBackupDocument(false)));
+        screenContent.addView(row(a.getString(R.string.scenic_backup_restore), null,
+                () -> a.scenicBackupDocument(true)));
+        note("Restore replaces current Scenic settings after confirmation. Keep a copy somewhere outside the TV. "
+                + "If Home fails, the project's tools/restore.sh and tools/recovery.py can restore the stock launcher "
+                + "using ADB; this settings backup cannot repair a broken Home installation.");
         focusFirstRow();
     }
 

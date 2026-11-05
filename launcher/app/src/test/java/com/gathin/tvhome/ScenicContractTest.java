@@ -262,4 +262,82 @@ public class ScenicContractTest {
         assertTrue("sheet sits below the header's buttons", ControlCenter.TOP_DP >= 96);
         assertTrue("lift stays inside the 16dp padding", ControlCenter.FOCUS_SCALE <= 1.05f);
     }
+
+    @Test public void controlCenterHasIndividualGlassWithoutAnOuterSheetOrRedundantTvFooter() {
+        String cc = src("ControlCenter.java");
+        assertFalse("no glass applied to the empty outer frame", cc.contains("SceneGlassDrawable.apply(card,"));
+        assertFalse("no extra round glass layer over Wi-Fi and Sound icons", cc.contains("SceneGlassDrawable.apply(disc,"));
+        assertFalse("no duplicate TV settings row", cc.contains("buildFooter();"));
+        assertContains("Wi-Fi and Sound capsules have their own frost", cc,
+                "SceneGlassDrawable.apply(c, 26f, GlassTone.Kind.CONTROL);");
+        assertContains("whole media platter takes focus", cc, "focusable(platter, () -> {");
+        assertContains("left from previous selects the platter", cc, "mediaPlatter.requestFocus();");
+    }
+
+    @Test public void scenicMediaCardOpensTheOwningMusicApp() {
+        String home = src("ScenicHome.java");
+        assertContains("CC media action", home, "public void listen() { quickAction(ScenicHome.this::openCurrentMediaApp); }");
+        String open = body(home, "private void openCurrentMediaApp()");
+        assertContains("current session package", open, "track.pkg");
+        assertContains("TV activity first", open, "getLeanbackLaunchIntentForPackage");
+        assertContains("regular activity fallback", open, "getLaunchIntentForPackage");
+    }
+
+    @Test public void downloadedAerialsCanBeDeletedButPhotoCollectionsCannotReappear() {
+        String activity = src("MainActivity.java");
+        String manager = body(activity, "void showDownloadedAerials()");
+        assertContains("local files available without Apple catalog", manager, "AerialBackdrop.catalog(this)");
+        assertContains("user confirms file deletion", manager, "R.string.aerials_confirm_remove");
+        assertContains("deletion goes through constrained storage helper", manager, "AerialDownloads.removeFile(this, selected[0])");
+        assertContains("selected deleted video is reset", manager, "AerialBackdrop.choose(this, AerialBackdrop.CYCLE)");
+        String deletion = body(src("AerialDownloads.java"), "static boolean removeFile(");
+        assertContains("no path traversal", deletion, "fileName.matches(");
+        assertContains("active downloads retained", deletion, "fileName.equals(downloading)");
+        assertContains("actual stored video removed", deletion, "video.delete()");
+        assertContains("silent remux cache cleared", deletion, "aerial-video-only");
+        assertContains("JSON index updated", deletion, "writeIndex(d, keep)");
+        String home = src("ScenicHome.java");
+        assertContains("delete option in Wallpapers", home, "a.showDownloadedAerials();");
+        assertContains("legacy photos can be removed only on user request", home, "a.legacyScenicPhotoBytes() > 0");
+        assertContains("legacy photos cleanup has its own confirmation", activity, "R.string.scenic_legacy_photos_confirm");
+        assertFalse("generic Scenic photo collections removed", home.contains("Scenic photo collections"));
+        assertFalse("photo gallery player removed", home.contains("ScenicWallpaperPlayer"));
+        assertFalse("photo gallery network feature removed", home.contains("CommonsWallpapers"));
+        File dir = new File("src/main/java/com/gathin/tvhome");
+        if (!dir.isDirectory()) dir = new File("launcher/app/src/main/java/com/gathin/tvhome");
+        for (String removed : new String[]{"CommonsWallpapers.java", "ScenicWallpaperCatalog.java", "ScenicWallpaperPlayer.java"}) {
+            assertFalse(removed + " should no longer ship", new File(dir, removed).exists());
+        }
+    }
+
+    @Test public void replacementWorksFromSearchWithoutTrappingFocusBehindAScreen() {
+        String home = src("ScenicHome.java");
+        String toggle = body(home, "boolean toggleFavourite(AppAdapter.Entry e)");
+        assertContains("close Search or Discover before focus moves", toggle, "closeScreenNow();");
+        assertContains("raise grid and dock", toggle, "showApps(true, false);");
+        String cancel = body(home, "private void cancelReplaceAndReturn()");
+        assertContains("Back returns to selected app in grid", cancel, "a.focusScenicGridPackage(previous);");
+    }
+
+    @Test public void backupDoesNotRestoreDeviceLocalThemeSignature() {
+        String backup = src("ScenicBackup.java");
+        String encode = body(backup, "static String encode(Context context)");
+        assertContains("local signature excluded from backup", encode,
+                "LOCAL_THEME_SIGNATURE.equals(entry.getKey())) continue;");
+        String restore = body(backup, "static void restore(Context context, String json)");
+        assertContains("old backups skip another TV's signature", restore,
+                "LOCAL_THEME_SIGNATURE.equals(key)) continue;");
+        assertContains("destination signature preserved", restore,
+                "editor.putString(LOCAL_THEME_SIGNATURE, localSignature);");
+    }
+
+    @Test public void scenicDockCapacityAndReplacementRemainDistinctFromAppGrid() {
+        String scenic = src("ScenicHome.java");
+        String adapter = src("AppAdapter.java");
+        assertContains("dock cap tracks advanced column setting", scenic,
+                "ScenicDockRules.capacity(cfg.columns)");
+        assertContains("All Apps button can be hidden", scenic, "SHOW_ALL_APPS_DOCK_KEY");
+        assertContains("full dock asks the owner which slot to replace", scenic, "replacingPkg = e.pkg;");
+        assertContains("other apps dim during selection", adapter, "scenicReplacementCandidate.equals(e.pkg) ? 1f : 0.28f");
+    }
 }

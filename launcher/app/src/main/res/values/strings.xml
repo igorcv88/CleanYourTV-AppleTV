@@ -171,6 +171,19 @@
 
     <!-- Optional Scenic Glass Home, originally developed for this fork. -->
     <string name="scenic_all_apps">All Apps</string>
+    <string name="scenic_replace_choose">Dock full. Choose an app in the Dock to replace with %1$s; Back cancels.</string>
+    <string name="scenic_replaced">%1$s added to the Dock</string>
+    <string name="scenic_hide_allapps_requires_favourite">Add a Dock favourite before hiding All Apps</string>
+    <string name="scenic_backup_save">Save backup to file or Drive</string>
+    <string name="scenic_backup_restore">Restore backup from file or Drive</string>
+    <string name="scenic_backup_confirm">Restore settings from this file? Current Dock, weather, Home and My Space choices will be replaced.</string>
+    <string name="scenic_backup_picker_missing">This TV has no compatible document picker. Google Drive backup is unavailable on this firmware.</string>
+    <string name="scenic_backup_saved">Backup exported successfully</string>
+    <string name="scenic_backup_restored">Settings restored</string>
+    <string name="scenic_backup_failed">Could not read or write the backup</string>
+    <string name="scenic_legacy_photos_cleanup">Remove old Scenic photo downloads</string>
+    <string name="scenic_legacy_photos_confirm">Remove the retired photo collection downloads (%1$d MiB)? This cannot be undone, but the built-in theme wallpapers are unaffected.</string>
+    <string name="scenic_legacy_photos_failed">Some old photo downloads could not be deleted</string>
     <string name="scenic_listen">Listen</string>
     <string name="scenic_settings">Settings</string>
     <string name="scenic_tv_settings">TV &amp; Chromecast settings</string>
@@ -212,6 +225,12 @@
     <string name="aerials_percent">%d%%</string>
     <string name="aerials_done">%s is ready in Background</string>
     <string name="aerials_removed">%s removed</string>
+    <string name="aerials_manage_downloaded">Manage downloaded aerial videos</string>
+    <string name="aerials_none_downloaded">No aerial videos are stored in this launcher\'s files.</string>
+    <string name="aerials_confirm_remove_title">Delete aerial video?</string>
+    <string name="aerials_confirm_remove">Delete %1$s from this TV? This frees storage and the video can be downloaded again.</string>
+    <string name="aerials_delete">Delete video</string>
+    <string name="aerials_remove_failed">Could not delete this video. It may still be downloading.</string>
     <string name="aerials_busy">One download at a time: wait for this one to finish</string>
     <string name="aerials_failed">Download failed. Try again.</string>
     <string name="aerials_no_space">Not enough space: it needs %1$d MB and the TV has %2$d MB free</string>
