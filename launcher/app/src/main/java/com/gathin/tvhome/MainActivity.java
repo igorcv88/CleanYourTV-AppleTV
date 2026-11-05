@@ -1175,12 +1175,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                             .setTitle(R.string.aerials_confirm_remove_title)
                             .setMessage(getString(R.string.aerials_confirm_remove, names[which]))
                             .setPositiveButton(R.string.aerials_delete, (confirm, choice) -> {
+                                // chosen() falls back as soon as a file disappears; capture this first.
+                                boolean removedChosen = selected[0].equals(AerialBackdrop.chosen(this, ""));
                                 if (!AerialDownloads.removeFile(this, selected[0])) {
                                     Toast.makeText(this, R.string.aerials_remove_failed, Toast.LENGTH_LONG).show();
                                     return;
                                 }
                                 Toast.makeText(this, getString(R.string.aerials_removed, selected[1]), Toast.LENGTH_LONG).show();
-                                if (selected[0].equals(AerialBackdrop.chosen(this, ""))) {
+                                if (removedChosen) {
                                     AerialBackdrop.choose(this, AerialBackdrop.CYCLE);
                                 }
                                 // Recreate so the video decoder no longer holds a deleted file open.

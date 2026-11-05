@@ -154,7 +154,9 @@ public class ScenicContractTest {
             n++;
             assertTrue("openScreen without a reopen action: " + m.group(), m.group(1).contains(","));
         }
-        assertTrue(n >= 15);
+        // The retired photo-collection screens were removed; the remaining settings/search
+        // hierarchy must still register its reopen actions.
+        assertTrue(n >= 12);
     }
 
     // ---- progress line -------------------------------------------------------------------------
@@ -290,6 +292,8 @@ public class ScenicContractTest {
         assertContains("user confirms file deletion", manager, "R.string.aerials_confirm_remove");
         assertContains("deletion goes through constrained storage helper", manager, "AerialDownloads.removeFile(this, selected[0])");
         assertContains("selected deleted video is reset", manager, "AerialBackdrop.choose(this, AerialBackdrop.CYCLE)");
+        assertContains("remember whether it was selected before unlinking", manager,
+                "boolean removedChosen = selected[0].equals(AerialBackdrop.chosen(this, \"\"));");
         String deletion = body(src("AerialDownloads.java"), "static boolean removeFile(");
         assertContains("no path traversal", deletion, "fileName.matches(");
         assertContains("active downloads retained", deletion, "fileName.equals(downloading)");
