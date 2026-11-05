@@ -505,10 +505,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // black under it is a second full-screen fill on every frame for nothing. The starting window still uses
         // the theme's background, so launch looks the same.
         getWindow().setBackgroundDrawable(null);
-        wallpaperPlayer = new WallpaperPlayer(this, root, cfg);
+        wallpaperPlayer = new WallpaperPlayer(this, root, cfg,
+                cfg.scenicHome && ScenicWallpaperPlayer.selected(this));
         if (cfg.scenicHome) {
-            boolean stillSelected = "still".equals(getSharedPreferences(ScenicHome.PREFS, MODE_PRIVATE)
-                    .getString(ScenicHome.WALLPAPER_KEY, "auto"));
+            String scenicBackground = getSharedPreferences(ScenicHome.PREFS, MODE_PRIVATE)
+                    .getString(ScenicHome.WALLPAPER_KEY, "auto");
+            boolean stillSelected = !"auto".equals(scenicBackground);
             scenicAerial = stillSelected ? null : AerialBackdrop.attach(this, root,
                     root.indexOfChild(findViewById(R.id.sky)),
                     AerialBackdrop.chosen(this, ""), cfg.backgroundColor);
@@ -976,9 +978,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             glass.setVisibility(View.GONE);
             hero.setVisibility(View.GONE);
             if (racePanel != null) racePanel.setVisibility(View.GONE);
-            boolean useStill = scenicAerial == null && cfg.wallpapers.isEmpty();
+            boolean useStill = scenicAerial == null && cfg.wallpapers.isEmpty()
+                    && !ScenicWallpaperPlayer.selected(this);
             scenic = new ScenicHome(this, root, cfg, useStill, root.indexOfChild(ambient));
-            if (scenicAerial == null && !cfg.wallpapers.isEmpty()) scenic.useWallpaperScene(cfg.wallpapers.get(0));
+            if (scenicAerial == null && !cfg.wallpapers.isEmpty() && !ScenicWallpaperPlayer.selected(this))
+                scenic.useWallpaperScene(cfg.wallpapers.get(0));
             scenic.onAppsChanged(adapter.entries());
             grid.post(scenic::focusHome);
         }
@@ -1033,6 +1037,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         else showInputs();
     }
     void openLauncherSettings() { startActivityForResult(new Intent(this, LauncherSettingsActivity.class), LAUNCHER_SETTINGS_REQUEST); }
+    void openThemeGallery() { startActivity(new Intent(this, ThemeGalleryActivity.class)); }
     void startReorder() {
         if (scenic != null && !scenic.appsShown()) scenic.showApps(true, true);
         if (!reordering) grid.post(this::toggleReorder);
@@ -3896,6 +3901,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private int holdOkPosition = -1;
     private String holdOkKey;    // the app under OK when it went down; a tile rebuild can move another app to that slot
     private boolean holdOkFired;
+    /** Native View long-click and our remote hold timer can fire for the SAME press. */
+    private final ScenicHoldGuard scenicHoldGuard = new ScenicHoldGuard();
     private final Runnable holdOkTimer = this::fireHoldOk;
 
     private static boolean isOkKey(int code) {
@@ -3908,7 +3915,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (!tileMenuEnabled || !isOkKey(event.getKeyCode())) return false;
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
             if (event.getRepeatCount() == 0) {
+                // Philips/IR remotes may report a held key as several zero-repeat DOWN frames
+                // without an intervening UP. It is still the same press, already consumed.
+                int focused = focusedTilePosition();
+                if (holdOkDown >= 0 && holdOkKey != null && focused >= 0
+                        && holdOkKey.equals(adapter.keyAt(focused))) return holdOkFired;
                 holdOkFired = false;
+                scenicHoldGuard.startPress();
                 handler.removeCallbacks(holdOkTimer);
                 holdOkPosition = reordering || openPopup != null || cardPrompt != null ? -1 : focusedTilePosition();
                 holdOkKey = holdOkPosition < 0 || holdOkPosition >= adapter.appCount() ? null : adapter.keyAt(holdOkPosition);
@@ -3933,6 +3946,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         holdOkKey = null;
         if (holdOkFired) {
             holdOkFired = false;
+            scenicHoldGuard.startPress();
             View f = getCurrentFocus();
             if (f != null) f.setPressed(false);
             return true;
@@ -3970,6 +3984,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     public void onTileLongPress(int position, View card) {
         if (scenic != null && scenic.appsShown() && position >= 0 && position < adapter.appCount()) {
+            if (holdOkDown >= 0) {
+                // AppAdapter's View long-click may fire around 500ms and holdOkTimer at 550ms.
+                // Both reach this callback. The first owns the press, even if the grid rebinds.
+                if (!scenicHoldGuard.claim(adapter.keyAt(position), SystemClock.uptimeMillis())) return;
+                holdOkFired = true;
+                handler.removeCallbacks(holdOkTimer);
+            }
             for (AppAdapter.Entry item : adapter.entries()) {
                 if (item.pkg.equals(adapter.packageAt(position))) {
                     scenic.toggleFavourite(item);

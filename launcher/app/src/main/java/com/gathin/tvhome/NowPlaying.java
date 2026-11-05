@@ -17,6 +17,10 @@ import android.provider.Settings;
 import android.util.Log;
 
 import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -220,9 +224,9 @@ final class NowPlaying {
             return;
         }
         Bitmap bmp = m == null ? null : firstBitmap(m);
-        String uri = m == null ? null : firstString(m, MediaMetadata.METADATA_KEY_ALBUM_ART_URI,
-                MediaMetadata.METADATA_KEY_ART_URI, MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI);
-        t.artKey = t.pkg + '|' + t.title + '|' + t.album + '|' + (bmp != null ? bmp.getGenerationId() + "x" + bmp.getWidth() : uri);
+        List<String> artUris = m == null ? new ArrayList<>() : artUris(m);
+        t.artKey = t.pkg + '|' + t.title + '|' + t.album + '|' + (bmp != null
+                ? bmp.getGenerationId() + "x" + bmp.getWidth() : artUris.toString());
         if (t.artKey.equals(lastArtKey)) {
             t.art = lastArt;
             t.blurredArt = lastBlurred;
@@ -234,14 +238,20 @@ final class NowPlaying {
         lastArtKey = t.artKey;
         lastArt = null;
         lastBlurred = null;
-        artLoading = bmp != null || uri != null;
+        artLoading = bmp != null || !artUris.isEmpty();
         t.artPending = artLoading;
         final int gen = ++artGeneration;
         listener.onNowPlaying(t);
         if (!artLoading) return;
         final String key = t.artKey;
         worker.execute(() -> {
-            Bitmap src = bmp != null ? bmp : load(uri);
+            Bitmap src = bmp;
+            // A content:// URI may be private to Spotify; try every alternative that
+            // the same media session supplies, including its HTTPS cover-art CDN URI.
+            if (src == null) for (String candidate : artUris) {
+                src = load(candidate);
+                if (src != null) break;
+            }
             Bitmap shown = src == null ? null : scaleDown(src, 512);
             Bitmap blur = src == null ? null : Blur.blurred(src, 48, 3);
             main.post(() -> {
@@ -270,19 +280,23 @@ final class NowPlaying {
         return null;
     }
 
-    private static String firstString(MediaMetadata m, String... keys) {
+    private static List<String> artUris(MediaMetadata m) {
+        List<String> result = new ArrayList<>();
+        String[] keys = {MediaMetadata.METADATA_KEY_ALBUM_ART_URI, MediaMetadata.METADATA_KEY_ART_URI,
+                MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI};
         for (String k : keys) {
             String v = m.getString(k);
-            if (v != null && !v.isEmpty()) return v;
+            if (v != null && !v.isEmpty() && !result.contains(v)) result.add(v);
         }
-        return null;
+        return result;
     }
 
-    /** content:// or android.resource:// only; http art would mean network work the launcher does not do. */
+    /** Try provider artwork first; official music apps also provide HTTPS album-art CDN URLs. */
     private Bitmap load(String uri) {
         try {
             Uri u = Uri.parse(uri);
             String scheme = u.getScheme();
+            if ("https".equalsIgnoreCase(scheme)) return loadHttps(u);
             if (!"content".equals(scheme) && !"android.resource".equals(scheme) && !"file".equals(scheme)) return null;
             BitmapFactory.Options o = new BitmapFactory.Options();
             o.inJustDecodeBounds = true;
@@ -298,6 +312,45 @@ final class NowPlaying {
             }
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /** Bounded download, only for the HTTPS URI supplied by the active media session.
+     * No arbitrary HTTP redirects, local-network URL fetching, extra SDK or main-thread I/O. */
+    private static Bitmap loadHttps(Uri uri) {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(uri.toString());
+            if (!"https".equalsIgnoreCase(url.getProtocol()) || url.getHost().isEmpty()) return null;
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(6000);
+            connection.setRequestProperty("Accept", "image/*");
+            if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) return null;
+            if (connection.getContentLength() > 4 * 1024 * 1024) return null;
+            byte[] data;
+            try (InputStream in = connection.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                byte[] buf = new byte[8192];
+                for (int n; (n = in.read(buf)) != -1;) {
+                    if (out.size() + n > 4 * 1024 * 1024) return null;
+                    out.write(buf, 0, n);
+                }
+                data = out.toByteArray();
+            }
+            BitmapFactory.Options probe = new BitmapFactory.Options();
+            probe.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(data, 0, data.length, probe);
+            if (probe.outWidth < 1 || probe.outHeight < 1) return null;
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = 1;
+            while (Math.max(probe.outWidth, probe.outHeight) / (opts.inSampleSize * 2) >= 512)
+                opts.inSampleSize *= 2;
+            return BitmapFactory.decodeByteArray(data, 0, data.length, opts);
+        } catch (Exception ignored) {
+            return null;
+        } finally {
+            if (connection != null) connection.disconnect();
         }
     }
 
