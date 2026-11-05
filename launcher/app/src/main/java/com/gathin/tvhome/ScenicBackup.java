@@ -12,6 +12,8 @@ final class ScenicBackup {
     private ScenicBackup() { }
 
     private static final String FORMAT = "scenic-launcher-settings";
+    /** Config.syncThemeChoices uses this device-specific stamp to detect an actual theme push. */
+    private static final String LOCAL_THEME_SIGNATURE = "theme_signature";
     private static final String[] SOURCES = {
             "scenic_favorites", "scenic_home", "scenic_weather", "scenic_myspace", Config.SETTINGS_NAME
     };
@@ -25,6 +27,7 @@ final class ScenicBackup {
             SharedPreferences prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE);
             JSONObject entries = new JSONObject();
             for (Map.Entry<String, ?> entry : prefs.getAll().entrySet()) {
+                if (Config.SETTINGS_NAME.equals(name) && LOCAL_THEME_SIGNATURE.equals(entry.getKey())) continue;
                 Object value = entry.getValue();
                 if (value instanceof String || value instanceof Boolean || value instanceof Integer
                         || value instanceof Long || value instanceof Float) {
@@ -55,6 +58,8 @@ final class ScenicBackup {
             java.util.Iterator<String> keys = values.keys();
             while (keys.hasNext()) {
                 String key = keys.next();
+                // Old backups may still contain a signature from another TV; never apply it.
+                if (Config.SETTINGS_NAME.equals(name) && LOCAL_THEME_SIGNATURE.equals(key)) continue;
                 if (key.isEmpty() || key.length() > 160 || destination.size() >= 128)
                     throw new IllegalArgumentException("Invalid backup entry");
                 JSONObject item = values.getJSONObject(key);
@@ -75,8 +80,10 @@ final class ScenicBackup {
             checked.put(name, destination);
         }
         for (Map.Entry<String, java.util.Map<String, Object>> entry : checked.entrySet()) {
-            SharedPreferences.Editor editor = context.getSharedPreferences(entry.getKey(), Context.MODE_PRIVATE)
-                    .edit().clear();
+            SharedPreferences prefs = context.getSharedPreferences(entry.getKey(), Context.MODE_PRIVATE);
+            String localSignature = Config.SETTINGS_NAME.equals(entry.getKey())
+                    ? prefs.getString(LOCAL_THEME_SIGNATURE, null) : null;
+            SharedPreferences.Editor editor = prefs.edit().clear();
             for (Map.Entry<String, Object> item : entry.getValue().entrySet()) {
                 Object v = item.getValue();
                 if (v instanceof String) editor.putString(item.getKey(), (String) v);
@@ -85,6 +92,7 @@ final class ScenicBackup {
                 else if (v instanceof Long) editor.putLong(item.getKey(), (Long) v);
                 else if (v instanceof Float) editor.putFloat(item.getKey(), (Float) v);
             }
+            if (localSignature != null) editor.putString(LOCAL_THEME_SIGNATURE, localSignature);
             if (!editor.commit()) throw new IllegalStateException("Could not save restored settings");
         }
     }

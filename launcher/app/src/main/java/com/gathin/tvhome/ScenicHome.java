@@ -461,6 +461,13 @@ final class ScenicHome implements NowPlaying.Listener {
         boolean adding = !favourites.contains(e.pkg);
         if (adding && ScenicDockRules.needsReplacement(
                 Favorites.visible(favourites, byPkg.keySet()), e.pkg, dockCapacity())) {
+            // Search and Discover also expose long-press Add to Dock. Their screen layer traps
+            // D-pad focus, so move into the expanded All Apps layout before picking a slot.
+            // Back then returns to the original app, still highlighted in the grid.
+            if (screen.getVisibility() == View.VISIBLE && screens.depth() > 0) {
+                closeScreenNow();
+                showApps(true, false);
+            }
             replacingPkg = e.pkg;
             a.setScenicReplacementCandidate(e.pkg);
             Toast.makeText(a, a.getString(R.string.scenic_replace_choose, e.label), Toast.LENGTH_LONG).show();

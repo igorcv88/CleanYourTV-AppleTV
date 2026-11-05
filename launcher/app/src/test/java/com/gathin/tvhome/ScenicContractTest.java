@@ -310,6 +310,27 @@ public class ScenicContractTest {
         }
     }
 
+    @Test public void replacementWorksFromSearchWithoutTrappingFocusBehindAScreen() {
+        String home = src("ScenicHome.java");
+        String toggle = body(home, "boolean toggleFavourite(AppAdapter.Entry e)");
+        assertContains("close Search or Discover before focus moves", toggle, "closeScreenNow();");
+        assertContains("raise grid and dock", toggle, "showApps(true, false);");
+        String cancel = body(home, "private void cancelReplaceAndReturn()");
+        assertContains("Back returns to selected app in grid", cancel, "a.focusScenicGridPackage(previous);");
+    }
+
+    @Test public void backupDoesNotRestoreDeviceLocalThemeSignature() {
+        String backup = src("ScenicBackup.java");
+        String encode = body(backup, "static String encode(Context context)");
+        assertContains("local signature excluded from backup", encode,
+                "LOCAL_THEME_SIGNATURE.equals(entry.getKey())) continue;");
+        String restore = body(backup, "static void restore(Context context, String json)");
+        assertContains("old backups skip another TV's signature", restore,
+                "LOCAL_THEME_SIGNATURE.equals(key)) continue;");
+        assertContains("destination signature preserved", restore,
+                "editor.putString(LOCAL_THEME_SIGNATURE, localSignature);");
+    }
+
     @Test public void scenicDockCapacityAndReplacementRemainDistinctFromAppGrid() {
         String scenic = src("ScenicHome.java");
         String adapter = src("AppAdapter.java");
