@@ -4,6 +4,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
+import android.graphics.LinearGradient;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
@@ -15,17 +16,16 @@ import android.view.View;
 import androidx.annotation.NonNull;
 
 /**
- * Real frosted glass without a live blur: paints the part of the {@link Scene}'s pre-blurred image that lies
- * under the host view (same centre-crop mapping as the backdrop, so it lines up), then a faint cool tint and
- * the {@link LiquidGlassDrawable} rim and bloom on top. With no scene (a moving aerial) only tint and rim draw.
- * Costs one bitmap-shader fill per draw; nothing is allocated per frame.
+ * One continuous glass sheet: scene-aligned preblur, a single restrained tint and one hairline edge.
+ * The old combination of a tinted pane and LiquidGlassDrawable's six additional layers produced
+ * visible opaque bands on Android 11. All paints/shaders are cached outside draw().
  */
 final class SceneGlassDrawable extends Drawable {
     private final View host;
     private final float radius;
-    private final LiquidGlassDrawable rim;
     private final Paint scene = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Paint tint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Matrix matrix = new Matrix();
     private final RectF rect = new RectF();
     private final int[] loc = new int[2];
@@ -37,15 +37,18 @@ final class SceneGlassDrawable extends Drawable {
         this.host = host;
         float d = host.getResources().getDisplayMetrics().density;
         this.radius = radiusDp * d;
-        this.rim = new LiquidGlassDrawable(radiusDp, 0x00FFFFFF);
         this.tintColor = tintColor;
         tint.setColor(tintColor);
+        edge.setStyle(Paint.Style.STROKE);
+        edge.setStrokeWidth(Math.max(1f, d));
         Scene.register(host);
     }
 
     @Override
     protected void onBoundsChange(@NonNull android.graphics.Rect b) {
-        rim.setBounds(b);
+        edge.setShader(new LinearGradient(b.left, b.top, b.left, b.bottom,
+                new int[]{0xA0FFFFFF, 0x3CFFFFFF, 0x24FFFFFF, 0x52FFFFFF},
+                new float[]{0f, 0.22f, 0.8f, 1f}, Shader.TileMode.CLAMP));
     }
 
     @Override
@@ -72,12 +75,14 @@ final class SceneGlassDrawable extends Drawable {
         }
         tint.setAlpha(Math.round((tintColor >>> 24) * alpha / 255f));
         c.drawRoundRect(rect, radius, radius, tint);
-        rim.draw(c);
+        float inset = edge.getStrokeWidth() / 2f;
+        rect.inset(inset, inset);
+        edge.setAlpha(alpha);
+        c.drawRoundRect(rect, Math.max(0, radius - inset), Math.max(0, radius - inset), edge);
     }
 
     @Override public void setAlpha(int a) {
         alpha = a;
-        rim.setAlpha(a);
         invalidateSelf();
     }
 

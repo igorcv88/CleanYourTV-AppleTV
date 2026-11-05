@@ -2,18 +2,23 @@ package com.gathin.tvhome;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PathMeasure;
 import android.graphics.Typeface;
+import android.graphics.Shader;
+import android.os.SystemClock;
 import android.view.KeyEvent;
 import android.view.View;
 
 /**
  * Glass Current: the thin lit progress ribbon above the dock. A low, gently curved stroke (3.2dp), brighter
  * over the elapsed part, with the elapsed time at its left end and the remaining time at its right end; the
- * stroke runs between the two labels, so they never overlap. It is not an equalizer: the curve's shape is
- * fixed per width and changes only when the progress does (once a second while playing).
+ * stroke runs between the two labels. A low-amplitude ribbon moves gently while a track plays,
+ * tinted from its cover artwork; motion is decorative, not a microphone/audio FFT visualizer.
  *
  * Focusable only when the session supports seeking: then Left/Right seek 15 s per press and are consumed;
  * Up/Down pass through. Unfocused, it never touches D-pad keys.
@@ -39,6 +44,10 @@ final class GlassCurrentView extends View {
     private SeekListener seekListener;
     private int pathW = -1;
     private float pathStart, pathEnd;
+    private int accent = 0xFFA9D7F4;
+    private boolean playing;
+    private boolean animateWave = true;
+    private int lastGradientWidth = -1;
 
     GlassCurrentView(Context ctx) {
         super(ctx);
@@ -66,6 +75,49 @@ final class GlassCurrentView extends View {
 
     void setSeekListener(SeekListener l) {
         seekListener = l;
+    }
+
+    void setMotionEnabled(boolean enabled) {
+        animateWave = enabled;
+        invalidate();
+    }
+
+    void setPlaying(boolean value) {
+        if (playing == value) return;
+        playing = value;
+        pathW = -1;
+        invalidate();
+    }
+
+    /** A bright but restrained palette from the album's pixels, no heavyweight Palette dependency. */
+    void setArtwork(Bitmap artwork) {
+        int color = 0xFFA9D7F4;
+        if (artwork != null && artwork.getConfig() != Bitmap.Config.HARDWARE) {
+            try {
+                float hueX = 0f, hueY = 0f, weight = 0f;
+                float[] hsv = new float[3];
+                for (int y = 1; y <= 6; y++) for (int x = 1; x <= 6; x++) {
+                    int pixel = artwork.getPixel(x * (artwork.getWidth() - 1) / 7,
+                            y * (artwork.getHeight() - 1) / 7);
+                    Color.colorToHSV(pixel, hsv);
+                    float w = hsv[1] * hsv[2];
+                    float rad = (float) Math.toRadians(hsv[0]);
+                    hueX += Math.cos(rad) * w;
+                    hueY += Math.sin(rad) * w;
+                    weight += w;
+                }
+                if (weight > 1f) {
+                    float h = (float) Math.toDegrees(Math.atan2(hueY, hueX));
+                    color = Color.HSVToColor(new float[]{(h + 360f) % 360f, 0.72f, 1f});
+                }
+            } catch (RuntimeException ignored) { /* artwork may be revoked between session updates */ }
+        }
+        if (accent != color) {
+            accent = color;
+            glow.setColor((accent & 0x00FFFFFF) | 0x46000000);
+            lastGradientWidth = -1;
+            invalidate();
+        }
     }
 
     /** fraction -1 = unknown duration (subdued line, no remaining time). */
@@ -113,24 +165,39 @@ final class GlassCurrentView extends View {
         float labelW = Math.max(label.measureText("0:00:00"), 40f * density);
         pathStart = labelW + gap;
         pathEnd = w - labelW - gap;
-        float cy = h / 2f, amp = 3.5f * density;
+        // About 6dp at the crest while playing, 2dp at rest. The line itself stays 3.2dp.
+        float cy = h / 2f, amp = (playing && animateWave ? 6f : 2f) * density;
+        float phase = playing && animateWave ? (SystemClock.uptimeMillis() % 7000L) * (float) (2 * Math.PI / 7000L) : 0f;
         path.reset();
-        int steps = 48;
+        int steps = 72;
         for (int i = 0; i <= steps; i++) {
             float t = i / (float) steps;
             float x = pathStart + (pathEnd - pathStart) * t;
-            float y = cy - amp * (float) Math.sin(Math.PI * t) + amp * 0.35f * (float) Math.sin(2 * Math.PI * t * 1.5);
+            float envelope = (float) Math.sin(Math.PI * t);
+            float y = cy - amp * 0.65f * envelope
+                    + amp * envelope * (float) Math.sin(2 * Math.PI * (2.25f * t) - phase);
             if (i == 0) path.moveTo(x, y); else path.lineTo(x, y);
         }
         measure.setPath(path, false);
         pathW = w;
+        if (lastGradientWidth != w) {
+            float[] hsv = new float[3];
+            Color.colorToHSV(accent, hsv);
+            hsv[0] = (hsv[0] + 28f) % 360f;
+            int neighbor = Color.HSVToColor(hsv);
+            Shader gradient = new LinearGradient(pathStart, 0f, pathEnd, 0f,
+                    new int[]{0xFFFFFFFF, accent, neighbor, 0xE8FFFFFF},
+                    new float[]{0f, 0.38f, 0.76f, 1f}, Shader.TileMode.CLAMP);
+            lit.setShader(gradient);
+            lastGradientWidth = w;
+        }
     }
 
     @Override
     protected void onDraw(Canvas c) {
         int w = getWidth(), h = getHeight();
         if (w <= 0 || h <= 0) return;
-        if (pathW != w) buildPath(w, h);
+        if (pathW != w || (playing && animateWave)) buildPath(w, h);
         boolean focused = isFocused();
         label.setAlpha(focused ? 255 : 210);
         float base = h / 2f - (label.descent() + label.ascent()) / 2f;
@@ -153,5 +220,7 @@ final class GlassCurrentView extends View {
             measure.getPosTan(at, pos, null);
             c.drawCircle(pos[0], pos[1], 6f * density, knob);
         }
+        // ~12 Hz while Home is visible. No playback motion in reduced-motion mode.
+        if (playing && animateWave && isShown()) postInvalidateDelayed(83);
     }
 }

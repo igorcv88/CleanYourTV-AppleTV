@@ -2,9 +2,13 @@ package com.gathin.tvhome;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaPlayer;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
+import android.view.PixelCopy;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
@@ -12,6 +16,8 @@ import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
 import java.io.File;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * An Apple aerial looping behind Home, as on tvOS. The video goes to a SurfaceView, which the TV composes
@@ -34,9 +40,16 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
     private final View gridDim;
     private final SharedPreferences prefs;
     private MediaPlayer player;
+    private SurfaceView video;
     private SurfaceHolder surface;
     private boolean resumed;
     private boolean dimmed;
+    /** One downsampled frame every 16 seconds, never live GPU blur or a UI-thread pixel loop. */
+    private static final long GLASS_SAMPLE_MS = 16_000L;
+    private static final ExecutorService GLASS_WORKER = Executors.newSingleThreadExecutor();
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private boolean copyInFlight;
+    private final Runnable refreshGlass = this::sampleGlass;
 
     private static final String PREFS = "aerial_backdrop", CHOSEN = "file", POSITION = "position";
 
@@ -65,7 +78,7 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
                 Log.w(TAG, "cannot read aerials.json", e);
             }
         }
-        File[] files = dir.listFiles((d, n) -> n.endsWith(".mov") || n.endsWith(".mp4"));
+        File[] files = dir.listFiles((d, n) -> n.endsWith(".mov") || n.endsWith(".mp4") || n.endsWith(".webm"));
         if (files != null) {
             java.util.Arrays.sort(files);
             for (File f : files) {
@@ -77,6 +90,8 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
 
     /** The Background menu's "Cycle through all": each aerial plays once, then the next, round the catalog. */
     static final String CYCLE = "*cycle*";
+    /** The clips explicitly downloaded for the Brazil collection, without mixing other aerial themes. */
+    static final String CYCLE_BRAZIL = "*brazil*";
     /** While cycling: the aerial playing now, so Home picks up the rotation where it left it. */
     private static final String CYCLE_FILE = "cycle_file";
 
@@ -86,7 +101,7 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
      */
     static String chosen(Context context, String configured) {
         String f = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(CHOSEN, null);
-        if (CYCLE.equals(f)) return CYCLE;
+        if (CYCLE.equals(f) || CYCLE_BRAZIL.equals(f)) return f;
         File dir = context.getExternalFilesDir("aerials");
         return f != null && dir != null && new File(dir, f).canRead() ? f : configured;
     }
@@ -104,24 +119,29 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
         if (fileName == null || fileName.isEmpty()) return null;
         File dir = context.getExternalFilesDir("aerials");
         if (dir == null) return null;
-        boolean cycle = CYCLE.equals(fileName);
+        boolean cycle = CYCLE.equals(fileName) || CYCLE_BRAZIL.equals(fileName);
+        boolean brazilOnly = CYCLE_BRAZIL.equals(fileName);
         if (cycle) {
             java.util.List<String[]> all = catalog(context);
+            if (brazilOnly) all.removeIf(v -> !v[0].startsWith("br_"));
             if (all.isEmpty()) return null;
             String at = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(CYCLE_FILE, null);
-            fileName = at != null && new File(dir, at).canRead() ? at : all.get(0)[0];
+            fileName = at != null && (!brazilOnly || at.startsWith("br_")) && new File(dir, at).canRead()
+                    ? at : all.get(0)[0];
         }
         File f = new File(dir, fileName);
         if (!f.canRead()) return null;
-        return new AerialBackdrop(context, root, index, f, coverColor, cycle);
+        return new AerialBackdrop(context, root, index, f, coverColor, cycle, brazilOnly);
     }
 
     private final Context context;
     private final boolean cycle;
+    private final boolean brazilOnly;
 
     /** Cycling: the aerial after the one playing, in catalog order, wrapping round. */
     private File nextInCycle() {
         java.util.List<String[]> all = catalog(context);
+        if (brazilOnly) all.removeIf(v -> !v[0].startsWith("br_"));
         if (all.isEmpty()) return file;
         int i = 0;
         for (int k = 0; k < all.size(); k++) if (all.get(k)[0].equals(file.getName())) i = k + 1;
@@ -141,15 +161,17 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
         }).start();
     }
 
-    private AerialBackdrop(Context context, FrameLayout root, int index, File file, int coverColor, boolean cycle) {
+    private AerialBackdrop(Context context, FrameLayout root, int index, File file, int coverColor,
+                           boolean cycle, boolean brazilOnly) {
         this.file = file;
         this.context = context.getApplicationContext();
         this.cycle = cycle;
+        this.brazilOnly = brazilOnly;
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         FrameLayout.LayoutParams full = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
 
-        SurfaceView video = new SurfaceView(context);
+        video = new SurfaceView(context);
         video.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         video.getHolder().addCallback(this);
         root.addView(video, index, full);
@@ -229,6 +251,7 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
             mp.setOnInfoListener((p, what, extra) -> {
                 if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START && player == p) {
                     cover.animate().alpha(0f).setDuration(700).start();
+                    if (scenic) main.postDelayed(refreshGlass, 900);
                 }
                 return false;
             });
@@ -245,6 +268,7 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
     }
 
     private void release() {
+        main.removeCallbacks(refreshGlass);
         MediaPlayer mp = player;
         player = null;
         if (mp == null) return;
@@ -266,5 +290,34 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
     @Override public void surfaceDestroyed(SurfaceHolder holder) {
         surface = null;
         release();
+    }
+
+    /** Gives the translucent dock/panel a scene-aligned frosted backdrop even over an aerial SurfaceView.
+     * PixelCopy runs asynchronously; no per-frame capture and no blur on the UI thread. */
+    private void sampleGlass() {
+        if (!scenic || !resumed || player == null || surface == null) return;
+        main.removeCallbacks(refreshGlass);
+        main.postDelayed(refreshGlass, GLASS_SAMPLE_MS);
+        if (copyInFlight || video.getWidth() == 0 || video.getHeight() == 0) return;
+        final Bitmap snapshot;
+        try {
+            snapshot = Bitmap.createBitmap(Math.max(32, video.getWidth() / 4),
+                    Math.max(18, video.getHeight() / 4), Bitmap.Config.ARGB_8888);
+        } catch (OutOfMemoryError ignored) { return; }
+        copyInFlight = true;
+        try {
+            PixelCopy.request(video, snapshot, result -> {
+                copyInFlight = false;
+                if (result != PixelCopy.SUCCESS || !resumed) { snapshot.recycle(); return; }
+                GLASS_WORKER.execute(() -> {
+                    Bitmap blurred = Blur.blurred(snapshot, 96, 4);
+                    snapshot.recycle();
+                    main.post(() -> { if (resumed && scenic && player != null) Scene.setStill(blurred); });
+                });
+            }, main);
+        } catch (IllegalArgumentException e) {
+            copyInFlight = false;
+            snapshot.recycle();
+        }
     }
 }

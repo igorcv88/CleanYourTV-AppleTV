@@ -26,6 +26,7 @@ import java.util.concurrent.Executors;
 final class Weather {
     static final long REFRESH_MS = 30 * 60_000L;
     private static final String PREFS = "scenic_weather";
+    static final String CELSIUS = "celsius", FAHRENHEIT = "fahrenheit";
 
     interface Callback {
         void onWeather(String line);
@@ -51,6 +52,17 @@ final class Weather {
 
     String place() {
         return prefs().getString("place", "");
+    }
+
+    /** Explicit TV preference, independent of the firmware's locale (which may be set to en-US). */
+    String unit() {
+        return prefs().getString("unit", "US".equals(Locale.getDefault().getCountry()) ? FAHRENHEIT : CELSIUS);
+    }
+
+    void setUnit(String choice) {
+        if (!CELSIUS.equals(choice) && !FAHRENHEIT.equals(choice)) return;
+        prefs().edit().putString("unit", choice).remove("line").apply();
+        fetchedAt = 0;
     }
 
     /** The last good reading, shown at once on start (marked by age, never invented). */
@@ -93,7 +105,8 @@ final class Weather {
         if (!configured() || busy || System.currentTimeMillis() - fetchedAt < REFRESH_MS) return;
         busy = true;
         float lat = prefs().getFloat("lat", 0), lon = prefs().getFloat("lon", 0);
-        boolean fahrenheit = "US".equals(Locale.getDefault().getCountry());
+        String unit = unit();
+        boolean fahrenheit = FAHRENHEIT.equals(unit);
         NET.execute(() -> {
             String line = null;
             try {
@@ -107,6 +120,7 @@ final class Weather {
             String result = line;
             main.post(() -> {
                 busy = false;
+                if (!unit.equals(unit())) { refresh(cb); return; }
                 if (result == null) {
                     // Offline or refused: try again in 5 minutes, not on every minute tick.
                     fetchedAt = System.currentTimeMillis() - REFRESH_MS + 5 * 60_000L;

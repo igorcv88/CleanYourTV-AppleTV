@@ -14,6 +14,7 @@ import android.graphics.Outline;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
@@ -48,6 +49,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.File;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -105,6 +107,7 @@ final class ScenicHome implements NowPlaying.Listener {
     private final ImageView wash;
     private final View dim;
     private ImageView still;
+    private final ScenicWallpaperPlayer wallpaperGallery;
 
     private FrameLayout listenLayer;
     private ImageView bigArt;
@@ -115,6 +118,8 @@ final class ScenicHome implements NowPlaying.Listener {
 
     private FrameLayout panel;
     private LinearLayout panelRows;
+    private TextView panelTitle;
+    private ScrollView panelScroll;
     private FrameLayout screen;
     private LinearLayout screenContent;
     private TextView screenTitle;
@@ -127,6 +132,7 @@ final class ScenicHome implements NowPlaying.Listener {
     /** Scene decoding and painting, one thread for this Home instance; shut down in release(). */
     private final java.util.concurrent.ExecutorService worker = Executors.newSingleThreadExecutor();
     private boolean released;
+    private int screenToken;
 
     private List<String> favourites;
     private final Map<String, AppAdapter.Entry> byPkg = new HashMap<>();
@@ -157,9 +163,12 @@ final class ScenicHome implements NowPlaying.Listener {
         wash.setVisibility(View.GONE);
         wash.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         root.addView(wash, Math.max(0, Math.min(washIndex, root.getChildCount())), full());
+        wallpaperGallery = ScenicWallpaperPlayer.selected(a)
+                ? new ScenicWallpaperPlayer(a, root, root.indexOfChild(wash)) : null;
         // Gentle shade for the Apps screen's names; Home itself stays open.
         dim = new View(activity);
-        dim.setBackgroundColor(0x6607090F);
+        dim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0x14080F18, 0x38080F18, 0x47080F18}));
         dim.setAlpha(0f);
         dim.setVisibility(View.GONE);
         dim.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -172,6 +181,8 @@ final class ScenicHome implements NowPlaying.Listener {
 
         // ---- header ----
         FrameLayout head = new FrameLayout(activity);
+        head.setClipChildren(false);
+        head.setClipToPadding(false);
         header = head;
         FrameLayout.LayoutParams headLp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64));
         headLp.setMargins(dp(56), dp(32), dp(48), 0);
@@ -259,6 +270,7 @@ final class ScenicHome implements NowPlaying.Listener {
         layer.addView(ribbon, ribbonLp);
         ribbon.setVisibility(View.GONE);
         ribbon.setSeekListener(this::seekBy);
+        ribbon.setMotionEnabled(!reducedMotion);
 
         // ---- now playing group, above the ribbon ----
         nowGroup = new LinearLayout(activity);
@@ -318,6 +330,14 @@ final class ScenicHome implements NowPlaying.Listener {
 
         buildPanel();
         buildScreen();
+        // The original Apps RecyclerView belongs to a weighted LinearLayout. Its classic
+        // header is gone in Scenic, so reserve a real layout inset (not a translation)
+        // before the first row: scrolling and D-pad focus must never slide under the clock.
+        View gridFrame = a.gridFrame();
+        ViewGroup.MarginLayoutParams gridLp = (ViewGroup.MarginLayoutParams) gridFrame.getLayoutParams();
+        gridLp.topMargin = dp(124);
+        gridLp.bottomMargin = dp(22);
+        gridFrame.setLayoutParams(gridLp);
         String w = weather.cached();
         weatherView.setText(w);
         weatherView.setVisibility(w.isEmpty() ? View.GONE : View.VISIBLE);
@@ -327,6 +347,7 @@ final class ScenicHome implements NowPlaying.Listener {
 
     void resume() {
         resumed = true;
+        if (wallpaperGallery != null) wallpaperGallery.start();
         nowPlaying.start();
         refreshWeather();
         startTick();
@@ -334,6 +355,7 @@ final class ScenicHome implements NowPlaying.Listener {
 
     void pause() {
         resumed = false;
+        if (wallpaperGallery != null) wallpaperGallery.pause();
         nowPlaying.stop();
         handler.removeCallbacks(tick);
         if (menu != null) menu.dismiss();
@@ -343,6 +365,7 @@ final class ScenicHome implements NowPlaying.Listener {
     void release() {
         released = true;
         nowPlaying.release();
+        if (wallpaperGallery != null) wallpaperGallery.close();
         worker.shutdownNow();
         Scene.reset();
     }
@@ -696,6 +719,9 @@ final class ScenicHome implements NowPlaying.Listener {
             // Keep focus inside the open overlay.
             if (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT
                     || code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
+                if (panel.getVisibility() == View.VISIBLE
+                        && (code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_DPAD_UP)
+                        && movePanelFocus(f, code == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1)) return true;
                 // A text field moves its own caret with Left/Right.
                 if (f instanceof EditText && (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT)) return false;
                 View container = panel.getVisibility() == View.VISIBLE ? panel : screen;
@@ -756,6 +782,7 @@ final class ScenicHome implements NowPlaying.Listener {
                     focusDock(lastDockPos);
                     return true;
                 case ROW_DOCK:
+                    showApps(true, true);
                     return true;
                 default:
             }
@@ -769,6 +796,25 @@ final class ScenicHome implements NowPlaying.Listener {
             }
         }
         return false;
+    }
+
+    /** Deterministic D-pad traversal across scroll boundaries and non-focusable section headings. */
+    private boolean movePanelFocus(View focused, int step) {
+        int current = -1;
+        for (int i = 0; i < panelRows.getChildCount(); i++) {
+            if (isInside(focused, panelRows.getChildAt(i))) { current = i; break; }
+        }
+        if (current < 0) return false;
+        for (int i = current + step; i >= 0 && i < panelRows.getChildCount(); i += step) {
+            View candidate = panelRows.getChildAt(i);
+            if (candidate.isFocusable() && candidate.getVisibility() == View.VISIBLE) {
+                candidate.requestFocus();
+                // ScrollView brings focused children into view itself; no scroll delta guessing.
+                return true;
+            }
+        }
+        if (step < 0) panelScroll.smoothScrollTo(0, 0);
+        return true;
     }
 
     private void focusControls() {
@@ -827,6 +873,8 @@ final class ScenicHome implements NowPlaying.Listener {
         NowPlaying.Track old = track;
         track = t;
         if (t == null) {
+            ribbon.setPlaying(false);
+            ribbon.setArtwork(null);
             if (listening) closeListen();
             if (!appsShown) {
                 fade(nowGroup, false, 0);
@@ -844,6 +892,8 @@ final class ScenicHome implements NowPlaying.Listener {
         nowArtist.setVisibility(t.artist != null ? View.VISIBLE : View.GONE);
         setArt(nowArt, t.art, 14f);
         boolean playing = MediaTime.advancing(t.state) || t.state == MediaTime.STATE_BUFFERING;
+        ribbon.setArtwork(t.art);
+        ribbon.setPlaying(playing);
         int toggleIcon = playing ? R.drawable.ic_pause : R.drawable.ic_play;
         btnToggle.setImageResource(toggleIcon);
         setVisible(btnPrev, MediaTime.can(t.actions, MediaTime.ACTION_SKIP_TO_PREVIOUS));
@@ -1150,26 +1200,33 @@ final class ScenicHome implements NowPlaying.Listener {
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(400), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END);
         lp.setMargins(0, dp(24), dp(24), dp(24));
         layer.addView(panel, lp);
-        panel.setBackground(new SceneGlassDrawable(panel, 28f, 0xB3101420));
+        panel.setBackground(new SceneGlassDrawable(panel, 28f, 0x45131C2B));
         panel.setOutlineProvider(rounded(28));
         panel.setClipToOutline(true);
         panel.setElevation(dp(24));
+        LinearLayout shell = new LinearLayout(a);
+        shell.setOrientation(LinearLayout.VERTICAL);
+        shell.setPadding(dp(16), dp(24), dp(16), dp(16));
+        panel.addView(shell, full());
+        panelTitle = text(26, display, TEXT);
+        panelTitle.setText(R.string.scenic_settings);
+        panelTitle.setPadding(dp(16), 0, 0, dp(12));
+        shell.addView(panelTitle, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+        // The heading is outside the scroll area. Requesting focus on row one can no
+        // longer scroll the heading off the top or remove the breathing room above it.
         ScrollView scroll = new ScrollView(a);
+        panelScroll = scroll;
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setClipToPadding(false);
         panelRows = new LinearLayout(a);
         panelRows.setOrientation(LinearLayout.VERTICAL);
-        panelRows.setPadding(dp(16), dp(24), dp(16), dp(24));
+        panelRows.setPadding(0, dp(10), 0, dp(30));
         scroll.addView(panelRows);
-        panel.addView(scroll, full());
+        shell.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
     }
 
     private void fillPanel() {
         panelRows.removeAllViews();
-        TextView title = text(26, display, TEXT);
-        title.setText(R.string.scenic_settings);
-        title.setPadding(dp(14), 0, 0, dp(14));
-        panelRows.addView(title);
         // System first: the TV's own settings (Chromecast/Google TV), network and inputs.
         panelRows.addView(row(a.getString(R.string.scenic_tv_settings), null, () -> { closePanelNow(); a.openTvSettings(); }));
         panelRows.addView(row(a.getString(R.string.scenic_network), null, () -> { closePanelNow(); a.openNetworkSettings(); }));
@@ -1190,7 +1247,8 @@ final class ScenicHome implements NowPlaying.Listener {
         }));
         panelRows.addView(row(a.getString(R.string.scenic_sounds), null, () -> { closePanelNow(); a.showSounds(); }));
         section("Home features");
-        panelRows.addView(row(a.getString(R.string.scenic_weather), weather.configured() ? weather.place() : "Off", this::openWeather));
+        panelRows.addView(row(a.getString(R.string.scenic_weather), weather.configured()
+                ? weather.place() + (Weather.CELSIUS.equals(weather.unit()) ? "  °C" : "  °F") : "Off", this::openWeather));
         panelRows.addView(row(a.getString(R.string.scenic_music_access), NowPlaying.hasAccess(a) ? "On" : "Needs access", this::openMusicAccess));
         section("More");
         panelRows.addView(row(a.getString(R.string.scenic_reorder), null, () -> {
@@ -1224,7 +1282,8 @@ final class ScenicHome implements NowPlaying.Listener {
         panel.animate().alpha(1f).translationX(0f).setDuration(reducedMotion ? 120 : PANEL_MS).setInterpolator(EASE)
                 .withLayer().start();
         a.playOpenSound();
-        panelRows.getChildAt(1).requestFocus();
+        panelScroll.scrollTo(0, 0);
+        panelRows.getChildAt(0).requestFocus();
     }
 
     private void closePanel() {
@@ -1263,7 +1322,7 @@ final class ScenicHome implements NowPlaying.Listener {
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(760), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER_HORIZONTAL);
         lp.setMargins(0, dp(40), 0, dp(40));
         screen.addView(box, lp);
-        box.setBackground(new SceneGlassDrawable(box, 30f, 0xB3101420));
+        box.setBackground(new SceneGlassDrawable(box, 30f, 0x45131C2B));
         box.setOutlineProvider(rounded(30));
         box.setClipToOutline(true);
         box.setElevation(dp(24));
@@ -1281,6 +1340,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openScreen(String title) {
+        screenToken++;
         boolean fromPanel = panel.getVisibility() == View.VISIBLE;
         if (fromPanel) {
             panel.animate().cancel();
@@ -1305,6 +1365,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void closeScreen() {
+        screenToken++; // Ignore any late gallery/network callbacks from the closed screen.
         hideKeyboard();
         screen.animate().cancel();
         screen.animate().alpha(0f).setDuration(reducedMotion ? 100 : 220)
@@ -1313,6 +1374,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void closeScreenNow() {
+        screenToken++;
         hideKeyboard();
         screen.animate().cancel();
         screen.setVisibility(View.GONE);
@@ -1518,6 +1580,7 @@ final class ScenicHome implements NowPlaying.Listener {
         SharedPreferences p = prefs();
         String choice = p.getString(WALLPAPER_KEY, "auto");
         boolean aerials = !AerialBackdrop.catalog(a).isEmpty();
+        heading("Motion scenery");
         screenContent.addView(choiceRow("Aerial video", aerials ? null : "None on this TV", "auto".equals(choice) && aerials, () -> {
             if (!aerials) { closeScreenNow(); a.showAerialDownloads(); return; }
             boolean wasStill = !"auto".equals(choice);
@@ -1528,20 +1591,311 @@ final class ScenicHome implements NowPlaying.Listener {
             closeScreenNow();
             a.showAerialPicker();
         }));
-        screenContent.addView(choiceRow("Built-in scenery", null, "still".equals(choice) || !aerials, () -> {
+        screenContent.addView(choiceRow("Built-in scenery", null,
+                "still".equals(choice) || ("auto".equals(choice) && !aerials), () -> {
             p.edit().putString(WALLPAPER_KEY, "still").apply();
             a.recreate();
         }));
         if (aerials) screenContent.addView(row("Download more aerials", null, () -> { closeScreenNow(); a.showAerialDownloads(); }));
-        note("Aerial videos play only while Home is in front and stop for apps and music. Built-in scenery is drawn "
-                + "on the TV. A theme wallpaper pushed with tools/theme.sh takes precedence over both.");
+        heading("Scenic photo collections");
+        String selectedGroup = p.getString(ScenicWallpaperPlayer.GROUP, "all");
+        screenContent.addView(choiceRow("All collections · Shuffle", "HD & downloaded 4K",
+                "gallery".equals(choice) && "all".equals(selectedGroup), () -> selectWallpaperGroup("all", "")));
+        for (ScenicWallpaperCatalog.Group group : ScenicWallpaperCatalog.GROUPS) {
+            int count = ScenicWallpaperPlayer.items(a, group.id).size();
+            screenContent.addView(row(group.label, count + " available" +
+                    ("gallery".equals(choice) && group.id.equals(selectedGroup) ? " · ✓" : ""),
+                    () -> openWallpaperGroup(group)));
+        }
+        screenContent.addView(row("Brazil · cities & landscapes", "7 regions", this::openBrazilWallpapers));
+        int minutes = p.getInt(ScenicWallpaperPlayer.MINUTES, 10);
+        screenContent.addView(row("Photo rotation", minutes + " min", () -> {
+            int next = ScenicWallpaperPlayer.ROTATION_MINUTES[0];
+            for (int i = 0; i < ScenicWallpaperPlayer.ROTATION_MINUTES.length; i++) {
+                if (minutes == ScenicWallpaperPlayer.ROTATION_MINUTES[i]) {
+                    next = ScenicWallpaperPlayer.ROTATION_MINUTES[(i + 1) % ScenicWallpaperPlayer.ROTATION_MINUTES.length];
+                    break;
+                }
+            }
+            p.edit().putInt(ScenicWallpaperPlayer.MINUTES, next).apply();
+            openWallpapers();
+        }));
+        note("Photos are included with the original CleanYourTV themes and work offline. Each group can rotate, "
+                + "or you can pin one photo. Optional Wikimedia Commons 4K downloads are saved on the TV, "
+                + "with the author and licence listed for every download. Aerial videos are separate.");
         focusFirstRow();
+    }
+
+    private void openBrazilWallpapers() {
+        openScreen("Brazil · aerial landscapes");
+        note("Select a city or state, then find 4K aerial photos on Wikimedia Commons. Downloads are optional "
+                + "and rotate as a group. The collection grows as you add photos; images are never downloaded "
+                + "automatically on mobile data or at startup.");
+        screenContent.addView(row("Brazil · moving aerial videos", "Download on demand", this::openBrazilVideos));
+        heading("Brazil · 4K photo collections");
+        for (ScenicWallpaperCatalog.Group group : ScenicWallpaperCatalog.BRAZIL) {
+            int count = ScenicWallpaperPlayer.items(a, group.id).size();
+            screenContent.addView(row(group.label, count + " downloaded", () -> openWallpaperGroup(group)));
+        }
+        focusFirstRow();
+    }
+
+    private void openBrazilVideos() {
+        openScreen("Brazil · drone videos");
+        List<String[]> installed = AerialBackdrop.catalog(a);
+        int brazilCount = 0;
+        for (String[] video : installed) if (video[0].startsWith("br_")) brazilCount++;
+        final int count = brazilCount;
+        screenContent.addView(row("Play Brazil videos · Rotate", count + " downloaded", () -> {
+            if (count == 0) { Toast.makeText(a, "Download a video first", Toast.LENGTH_SHORT).show(); return; }
+            prefs().edit().putString(WALLPAPER_KEY, "auto").apply();
+            AerialBackdrop.choose(a, AerialBackdrop.CYCLE_BRAZIL);
+            a.recreate();
+        }));
+        heading("Download free-licensed drone footage");
+        screenContent.addView(row("Explore videos across Brazil", null, () -> openBrazilVideoSources("all")));
+        screenContent.addView(row("Explore videos from Minas Gerais", null, () -> openBrazilVideoSources("minas")));
+        screenContent.addView(row("Video credits & licences", null, this::openBrazilVideoCredits));
+        note("The Wikimedia Commons drone video collection currently has limited cities. Salvador has a 4K "
+                + "clip, but footage from every Brazilian capital is not available. For Fortaleza, Rio and other "
+                + "regions, the 4K aerial photo collections above offer a larger selection. WebM playback also "
+                + "depends on the TV's video decoder.");
+        heading("Downloaded on this TV");
+        for (String[] video : installed) {
+            if (!video[0].startsWith("br_")) continue;
+            screenContent.addView(row(video[1], "Play this video", () -> {
+                prefs().edit().putString(WALLPAPER_KEY, "auto").apply();
+                AerialBackdrop.choose(a, video[0]);
+                a.recreate();
+            }));
+        }
+        focusFirstRow();
+    }
+
+    private void openBrazilVideoCredits() {
+        openScreen("Brazil videos · credits");
+        File dir = a.getExternalFilesDir("aerials");
+        File index = dir == null ? null : new File(dir, "aerials.json");
+        int n = 0;
+        try {
+            if (index != null && index.isFile() && index.length() < 128 * 1024) {
+                String content = new String(java.nio.file.Files.readAllBytes(index.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+                if (content.startsWith("\uFEFF")) content = content.substring(1);
+                org.json.JSONArray entries = new org.json.JSONArray(content);
+                for (int i = 0; i < entries.length(); i++) {
+                    org.json.JSONObject video = entries.optJSONObject(i);
+                    if (video == null || !video.optString("file").startsWith("br_")) continue;
+                    heading(video.optString("title", "Brazil aerial"));
+                    note(video.optString("credit", "") + "\n" + video.optString("source", ""));
+                    n++;
+                }
+            }
+        } catch (Exception ignored) { note("Could not read the current credit index."); }
+        if (n == 0) note("No Brazil video credits saved yet.");
+        screenContent.addView(row("Back to Brazil videos", null, this::openBrazilVideos));
+        focusFirstRow();
+    }
+
+    private void openBrazilVideoSources(String region) {
+        openScreen("Brazil · available drone clips");
+        note("Loading the Wikimedia Commons free-licensed video catalog…");
+        int generation = screenToken;
+        worker.execute(() -> {
+            List<BrazilAerials.Clip> clips = null;
+            String error = null;
+            try { clips = BrazilAerials.browse(region); }
+            catch (Exception e) { error = e.getMessage(); }
+            List<BrazilAerials.Clip> results = clips;
+            String failure = error;
+            handler.post(() -> {
+                if (released || generation != screenToken) return;
+                screenContent.removeAllViews();
+                if (failure != null) note("Could not load the catalog: " + failure);
+                else if (results == null || results.isEmpty()) note("No licensed clips matched. Try a different region.");
+                else for (BrazilAerials.Clip clip : results) {
+                    String quality = clip.height >= 2160 ? "4K" : clip.height >= 1080 ? "Full HD" : "HD";
+                    View r = row(clip.title, quality, () -> downloadBrazilVideo(clip));
+                    r.setContentDescription(clip.title + ". " + clip.credit + ". " + quality);
+                    screenContent.addView(r);
+                }
+                note("Each video is downloaded only after you select it. Clips can be large (up to 180 MiB) "
+                        + "and keep their source and attribution in aerials.json.");
+                screenContent.addView(row("Back to Brazil", null, this::openBrazilVideos));
+                focusFirstRow();
+            });
+        });
+    }
+
+    private void downloadBrazilVideo(BrazilAerials.Clip clip) {
+        openScreen("Downloading Brazil aerial");
+        note(clip.title + "\n" + clip.credit + "\n" + clip.source);
+        TextView progress = text(18, medium, TEXT);
+        progress.setText("Downloading… (up to 180 MiB)");
+        progress.setPadding(dp(16), dp(20), 0, dp(20));
+        screenContent.addView(progress);
+        int generation = screenToken;
+        worker.execute(() -> {
+            String error = null;
+            try {
+                BrazilAerials.save(a, clip, (bytes, total) -> handler.post(() -> {
+                    if (!released && generation == screenToken) {
+                        String progressLabel = (bytes / (1024 * 1024)) + " MiB downloaded";
+                        if (total > 0) progressLabel += " / " + (total / (1024 * 1024)) + " MiB";
+                        progress.setText(progressLabel);
+                    }
+                }));
+            } catch (Exception e) { error = e.getMessage(); }
+            String failure = error;
+            handler.post(() -> {
+                if (released || generation != screenToken) return;
+                if (failure == null) openBrazilVideos();
+                else {
+                    progress.setText("Download failed: " + failure);
+                    screenContent.addView(row("Retry", null, () -> downloadBrazilVideo(clip)));
+                    focusFirstRow();
+                }
+            });
+        });
+    }
+
+    private void selectWallpaperGroup(String group, String fixed) {
+        prefs().edit().putString(WALLPAPER_KEY, ScenicWallpaperPlayer.MODE)
+                .putString(ScenicWallpaperPlayer.GROUP, group)
+                .putString(ScenicWallpaperPlayer.FIXED, fixed)
+                .remove(ScenicWallpaperPlayer.CHANGED).apply();
+        a.recreate();
+    }
+
+    private void openWallpaperGroup(ScenicWallpaperCatalog.Group group) {
+        openScreen(group.label);
+        List<ScenicWallpaperCatalog.Item> photos = ScenicWallpaperPlayer.items(a, group.id);
+        screenContent.addView(row("Use collection · Shuffle", photos.isEmpty() ? "Download photos first" : photos.size() + " photos", () -> {
+            if (photos.isEmpty()) {
+                Toast.makeText(a, "Download at least one photo first", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            selectWallpaperGroup(group.id, "");
+        }));
+        screenContent.addView(row("Explore & download 4K", "Wikimedia Commons", () -> openCommonsGroup(group)));
+        screenContent.addView(row("Photo credits & licences", null, () -> openPhotoCredits(group)));
+        heading("Photos · choose to pin");
+        for (ScenicWallpaperCatalog.Item photo : photos) {
+            View item = wallpaperRow(photo, () -> selectWallpaperGroup(group.id, photo.id));
+            screenContent.addView(item);
+        }
+        if (photos.isEmpty()) note("No photos are bundled in this group. Explore Wikimedia Commons and download a "
+                + "4K photo to enable it. Photos are downloaded only when you select them.");
+        note("Downloaded photos are stored in this launcher's files, not in the APK. Their names, credits and "
+                + "licences are kept with them, and the file can be removed from the TV's storage settings.");
+        focusFirstRow();
+    }
+
+    private void openPhotoCredits(ScenicWallpaperCatalog.Group group) {
+        openScreen("Credits · " + group.label);
+        int n = 0;
+        for (ScenicWallpaperCatalog.Item photo : ScenicWallpaperPlayer.items(a, group.id)) {
+            if (photo.file == null) continue;
+            heading(photo.name);
+            note(photo.credit + "\n" + photo.source);
+            n++;
+        }
+        if (n == 0) note("This group currently uses the photos included with the original CleanYourTV themes. "
+                + "No Wikimedia Commons photos have been downloaded yet.");
+        screenContent.addView(row("Back to " + group.label, null, () -> openWallpaperGroup(group)));
+        focusFirstRow();
+    }
+
+    private void openCommonsGroup(ScenicWallpaperCatalog.Group group) {
+        openScreen("4K · " + group.label);
+        note("Searching Wikimedia Commons for landscape photos at least 3840 × 2160. Files are optional downloads; "
+                + "authors and licences remain available in this gallery. This may take a few seconds.");
+        int generation = screenToken;
+        worker.execute(() -> {
+            List<CommonsWallpapers.Photo> found = null;
+            String error = null;
+            try { found = CommonsWallpapers.search(group); }
+            catch (Exception e) { error = e.getMessage(); }
+            final List<CommonsWallpapers.Photo> results = found;
+            final String failure = error;
+            handler.post(() -> {
+                if (released || generation != screenToken) return;
+                screenContent.removeAllViews();
+                if (failure != null) {
+                    note("The 4K gallery is unavailable: " + failure + ". Built-in photos still work offline.");
+                } else if (results == null || results.isEmpty()) {
+                    note("No licensed landscape 4K photos matched this group. Try another group or try again later.");
+                } else {
+                    heading("4K photos · download on OK");
+                    for (CommonsWallpapers.Photo photo : results) {
+                        View item = row(photo.name, photo.width + "×" + photo.height, () -> downloadCommonsPhoto(group, photo));
+                        screenContent.addView(item);
+                        item.setContentDescription(photo.name + ", " + photo.credit);
+                    }
+                    note("Photo credits and their original Wikimedia Commons pages are saved with each download. "
+                            + "No automatic download happens while browsing.");
+                }
+                screenContent.addView(row("Back to " + group.label, null, () -> openWallpaperGroup(group)));
+                focusFirstRow();
+            });
+        });
+    }
+
+    private void downloadCommonsPhoto(ScenicWallpaperCatalog.Group group, CommonsWallpapers.Photo photo) {
+        openScreen("Downloading 4K photo");
+        note(photo.name + "\n" + photo.credit + "\n" + photo.source);
+        note("Downloading and saving to this TV. Please wait…");
+        int generation = screenToken;
+        worker.execute(() -> {
+            String error = null;
+            try { CommonsWallpapers.save(a, group, photo); }
+            catch (Exception e) { error = e.getMessage(); }
+            String failure = error;
+            handler.post(() -> {
+                if (released || generation != screenToken) return;
+                if (failure == null) openWallpaperGroup(group);
+                else {
+                    note("Could not download: " + failure);
+                    screenContent.addView(row("Retry", null, () -> downloadCommonsPhoto(group, photo)));
+                    focusFirstRow();
+                }
+            });
+        });
+    }
+
+    private View wallpaperRow(ScenicWallpaperCatalog.Item photo, Runnable action) {
+        View r = row(photo.name, photo.asset == null ? "4K" : "HD", action);
+        ImageView thumb = new ImageView(a);
+        thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(90), dp(49));
+        lp.setMarginEnd(dp(16));
+        ((LinearLayout) r).addView(thumb, 0, lp);
+        r.getLayoutParams().height = dp(64);
+        int generation = screenToken;
+        worker.execute(() -> {
+            try {
+                BitmapFactory.Options o = new BitmapFactory.Options();
+                o.inSampleSize = 16;
+                Bitmap image;
+                if (photo.asset != null) {
+                    try (InputStream in = a.getAssets().open(photo.asset)) { image = BitmapFactory.decodeStream(in, null, o); }
+                } else image = BitmapFactory.decodeFile(photo.file, o);
+                handler.post(() -> {
+                    if (!released && generation == screenToken) thumb.setImageBitmap(image);
+                });
+            } catch (Exception | OutOfMemoryError ignored) { }
+        });
+        if (photo.asset == null) r.setContentDescription(photo.name + ". " + photo.credit + ". " + photo.source);
+        return r;
     }
 
     private void openAppearance() {
         openScreen(a.getString(R.string.scenic_appearance));
         SharedPreferences choices = a.getSharedPreferences(Config.SETTINGS_NAME, Context.MODE_PRIVATE);
         boolean reduced = cfg.reducedMotion;
+        screenContent.addView(row("Choose one of 17 themes", null, () -> {
+            closeScreenNow();
+            a.openThemeGallery();
+        }));
         screenContent.addView(row("Reduced motion", reduced ? "On" : "Off", () -> {
             choices.edit().putBoolean(Config.REDUCED_MOTION_KEY, !reduced).apply();
             a.recreate();
@@ -1563,6 +1917,12 @@ final class ScenicHome implements NowPlaying.Listener {
 
     private void openWeather() {
         openScreen(a.getString(R.string.scenic_weather));
+        heading("Temperature units");
+        screenContent.addView(choiceRow("Celsius (°C)", null, Weather.CELSIUS.equals(weather.unit()),
+                () -> chooseWeatherUnit(Weather.CELSIUS)));
+        screenContent.addView(choiceRow("Fahrenheit (°F)", null, Weather.FAHRENHEIT.equals(weather.unit()),
+                () -> chooseWeatherUnit(Weather.FAHRENHEIT)));
+        heading("City");
         note(weather.configured() ? "Showing the weather for " + weather.place() + ", from Open-Meteo, refreshed at most "
                 + "every 30 minutes while Home is in front." : "Weather is off. Type a city to show its current "
                 + "conditions in the top left. Uses Open-Meteo (free, no account); nothing is sent but the city name "
@@ -1592,6 +1952,14 @@ final class ScenicHome implements NowPlaying.Listener {
             }));
         }
         city.requestFocus();
+    }
+
+    private void chooseWeatherUnit(String unit) {
+        weather.setUnit(unit);
+        weatherView.setText("");
+        refreshWeather();
+        openWeather();
+        screenContent.post(() -> screenContent.getChildAt(1).requestFocus());
     }
 
     private void openMusicAccess() {

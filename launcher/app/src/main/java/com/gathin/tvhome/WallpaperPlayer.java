@@ -32,6 +32,7 @@ import java.util.concurrent.Executors;
 /** Displays and rotates a theme's local wallpaper images while Home is visible. */
 final class WallpaperPlayer {
     private final FrameLayout root;
+    private final boolean enabled;
     private final ImageView image;
     private final int backgroundColor;
     private final List<File> files;
@@ -63,7 +64,13 @@ final class WallpaperPlayer {
     private int[] sun;
 
     WallpaperPlayer(Context context, FrameLayout root, Config config) {
+        this(context, root, config, false);
+    }
+
+    /** A Scenic photo collection owns the background; don't decode a second theme wallpaper beneath it. */
+    WallpaperPlayer(Context context, FrameLayout root, Config config, boolean overriddenByScenic) {
         this.root = root;
+        enabled = config.wallpaperEnabled && !overriddenByScenic;
         backgroundColor = config.backgroundColor;
         files = new ArrayList<>(config.wallpapers);
         interval = config.wallpaperRotationMinutes * 60_000L;
@@ -91,7 +98,7 @@ final class WallpaperPlayer {
         names = config.wallpaperCaptions && config.wallpaperEnabled && !files.isEmpty()
                 ? WallpaperCaptions.read(files.get(0).getParentFile()) : Collections.emptyMap();
         caption = names.isEmpty() ? null : makeCaption(context, root);
-        if (config.wallpaperEnabled && !files.isEmpty()) {
+        if (enabled && !files.isEmpty()) {
             root.addView(image, 0, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             showFirst();
@@ -129,6 +136,7 @@ final class WallpaperPlayer {
     }
 
     void start() {
+        if (!enabled) return;
         active = true;
         update();
     }
