@@ -122,6 +122,10 @@ public class ScenicContractTest {
                 "!scenicHome && DockSlots.inDockRow(dockRow, singleRow, position, dockSize)");
         assertContains("Scenic labels remain visible", adapter,
                 "cfg.scenicHome || cfg.alwaysShowNames ? 0.75f : 0f");
+        assertContains("classic empty slots never distort Scenic focus", adapter,
+                "emptySlots = !scenicHome && dockRow && !reordering");
+        assertContains("App library still counts pinned dock apps as on Home", adapter,
+                "for (Entry entry : allItems) if (entry.pkg.equals(pkg)) return true;");
         assertContains("empty grid leaves focus on the dock", home,
                 "if (a.hasScenicGridItems()) a.focusGridAt(0);\n                        else focusDock(lastDockPos);");
         String activity = src("MainActivity.java");

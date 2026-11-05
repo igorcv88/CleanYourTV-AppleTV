@@ -344,7 +344,10 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         }
         docked = 0;
         while (docked < fresh.size() && isDocked(fresh.get(docked))) docked++;
-        emptySlots = dockRow && !reordering ? DockSlots.empty(docked, dockSize, fresh.size(), fillDock) : 0;
+        // Scenic has an independent floating dock; phantom classic slots must never affect
+        // its grid focus positions, even when fill_dock is disabled by a theme.
+        emptySlots = !scenicHome && dockRow && !reordering
+                ? DockSlots.empty(docked, dockSize, fresh.size(), fillDock) : 0;
         for (int i = 0; i < emptySlots; i++) {
             fresh.add(docked + i, new Entry(Entry.EMPTY, "", new ComponentName(ctx, "empty-dock-slot-" + i),
                     null, null, null, 0));
@@ -613,7 +616,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     @Override public int getItemViewType(int position) { return isLibraryAt(position) ? 1 : 0; }
 
     boolean containsPackage(String pkg) {
-        for (Entry entry : items) if (entry.pkg.equals(pkg)) return true;
+        // The App library asks whether a package is on Home, not merely in the visible Scenic grid.
+        // Dock favourites are part of Home even though the grid hides their duplicate tiles.
+        for (Entry entry : allItems) if (entry.pkg.equals(pkg)) return true;
         return false;
     }
 
