@@ -655,7 +655,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                     else parent.smoothScrollBy(dx, 0);
                     return true;
                 }
-                if (dockRow && getPosition(child) < COLUMNS) return false;
+                if (dockRow && !cfg.scenicHome && getPosition(child) < COLUMNS) return false;
                 int top = child.getTop() + rect.top;
                 int bottom = top + rect.height();
                 // A row already fully on screen stays put, even inside the bottom padding (the last row
@@ -689,7 +689,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             public void onChildViewDetachedFromWindow(@NonNull View v) {
             }
         });
-        if (dockRow) grid.addItemDecoration(new DockDecoration(COLUMNS, density, cinematic, cfg.alwaysShowNames, cfg.dockOpacity, cfg.dockGlass, cfg.dockEvenPadding, cfg.dockBand,
+        if (dockRow && !cfg.scenicHome) grid.addItemDecoration(new DockDecoration(COLUMNS, density, cinematic, cfg.alwaysShowNames, cfg.dockOpacity, cfg.dockGlass, cfg.dockEvenPadding, cfg.dockBand,
                 singleRow, cfg.dockBandAll));
         if (cfg.fadeRows) TopFade.attach(grid, 48 * density);
         // Reduced motion: the tiles are simply there, with no entrance (reloadApps skips it there too).
@@ -708,6 +708,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // rows_below_dock grid rows under it; the rest of the grid stays below until you press Down.
         int rowsBelowDock = cfg.rowsBelowDock;
         grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (cfg.scenicHome) {
+                // Scenic's separate dock is raised by ScenicHome. Its grid must never inherit the
+                // classic dock's large top padding or resize to park a first-row shelf.
+                int plainTop = (int) (12 * density);
+                if (grid.getPaddingTop() != plainTop)
+                    grid.setPadding(grid.getPaddingLeft(), plainTop, grid.getPaddingRight(), grid.getPaddingBottom());
+                return;
+            }
             int h = b - t;
             // Item height follows the tile size, which follows the columns and the rows that must fit (AppAdapter.tileWidthPx).
             int inner = (r - l) - grid.getPaddingLeft() - grid.getPaddingRight();
@@ -1016,6 +1024,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     List<AppAdapter.Entry> allEntries() { return adapter.entries(); }
+    /** The Scenic dock remains backed by every installed app; only its separate grid omits dock favourites. */
+    void setScenicDockPackages(List<String> packages) { adapter.setScenicDockPackages(packages); }
     void playOpenSound() { if (scenicSound != null) scenicSound.onAppOpened(); }
     void playTick() { if (scenicSound != null) scenicSound.onFocusMoved(); }
     void openIntent(Intent intent) { open(intent); }
@@ -1954,6 +1964,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     public void onTileFocused(int position, View card) {
         lastFocused = position;
         lastFocusedKey = adapter.keyAt(position);
+        if (scenic != null) {
+            // The Scenic grid is below a separate floating dock: no classic hero, dock parking,
+            // or glass slab positioning. Its own tile focus effect still runs in AppAdapter.
+            View item = (View) card.getParent();
+            int focusRoom = (int) (12 * density);
+            revealRect.set(0, -focusRoom, item.getWidth(), item.getHeight() + focusRoom);
+            grid.requestChildRectangleOnScreen(item, revealRect, reducedMotion);
+            return;
+        }
         // Focus restored before the first layout (cold start): the tile has no size yet, and the glass
         // would be sized to 2*pad. Run again once the tile is laid out.
         if (card.getWidth() == 0) {

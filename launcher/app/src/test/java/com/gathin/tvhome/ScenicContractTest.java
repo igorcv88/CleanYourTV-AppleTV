@@ -75,7 +75,7 @@ public class ScenicContractTest {
         }
     }
 
-    // ---- D-pad: overlays keep focus, Dock/All Apps untouched ---------------------------------------
+    // ---- D-pad: overlays keep focus, dock and grid share the expanded Apps screen -------------------
 
     @Test public void everyOverlayTrapsTheDpad() {
         String keys = body(src("ScenicHome.java"), "boolean dispatchKey(KeyEvent ev)");
@@ -86,14 +86,47 @@ public class ScenicContractTest {
         assertContains("text field caret", keys, "f instanceof EditText");
     }
 
-    @Test public void dockAndAllAppsNavigationIsUnchanged() {
+    @Test public void dockAndAllAppsNavigateAsTwoStackedRows() {
         String keys = body(src("ScenicHome.java"), "boolean dispatchKey(KeyEvent ev)");
         assertContains("Down from the dock opens All Apps", keys,
                 "case ROW_DOCK:\n                    showApps(true, true);");
-        assertContains("Up from the grid's first row returns to the dock", keys,
-                "if (code == KeyEvent.KEYCODE_DPAD_UP && a.focusedGridIsFirstRow()) {\n                showApps(false, false);");
+        assertContains("Up from the first row focuses the raised dock", keys,
+                "row == ROW_NONE && a.focusedGridIsFirstRow()) {\n                focusDock(lastDockPos);");
+        assertContains("Down from the raised dock returns to the grid", keys,
+                "if (row == ROW_DOCK && code == KeyEvent.KEYCODE_DPAD_DOWN) {\n                a.focusGridAt(0);");
+        assertContains("Up from the raised dock collapses the sheet", keys,
+                "if (row == ROW_DOCK && code == KeyEvent.KEYCODE_DPAD_UP) {\n                showApps(false, false);");
         String back = body(src("ScenicHome.java"), "boolean onBack()");
         assertContains("Back from All Apps lands on All Apps", back, "focusDock(dockAdapter.getItemCount() - 1)");
+    }
+
+    @Test public void allAppsLiftsTheDockBelowTheHeaderAndReturnsItOnBack() {
+        String home = body(src("ScenicHome.java"), "void showApps(boolean show, boolean focusGrid)");
+        assertContains("header remains visible", home, "header.setVisibility(View.VISIBLE);");
+        assertContains("dock stops below the header", home, "ScenicAppsMotion.dockTop(headerBottom, dp(12))");
+        assertContains("grid reserves space for the dock", home, "ScenicAppsMotion.gridTop(dockTop, dockHeight, dp(14))");
+        assertContains("grid rises from below", home, "ScenicAppsMotion.entryTravel(root.getHeight(), gridTop, dp(32))");
+        assertContains("one animator coordinates the dock", home, "dockFrame.setTranslationY(appsDockShift * appsReveal);");
+        assertContains("one animator coordinates the grid", home, "gridFrame.setTranslationY(appsGridTravel * (1f - appsReveal));");
+        assertContains("reverse returns to Home", home, "float start = appsReveal, end = show ? 1f : 0f;");
+    }
+
+    @Test public void scenicHidesDockAppsOnlyInTheGrid() {
+        String home = src("ScenicHome.java");
+        assertContains("Scenic propagates live dock favourites", home, "a.setScenicDockPackages(visibleDock);");
+        String adapter = src("AppAdapter.java");
+        assertContains("grid filter uses the installed snapshot", adapter,
+                "ScenicGridFilter.withoutDock(present, scenicDockPackages");
+        assertContains("dock retains full installed entries", adapter, "for (Entry e : allItems) if (e.kind == Entry.APP)");
+        assertContains("Scenic does not hide names in its first grid row", adapter,
+                "!scenicHome && DockSlots.inDockRow(dockRow, singleRow, position, dockSize)");
+        String activity = src("MainActivity.java");
+        assertContains("Scenic grid skips the classic dock's top padding", activity,
+                "if (cfg.scenicHome) {\n                // Scenic's separate dock");
+        assertContains("Scenic does not draw a second dock band", activity,
+                "if (dockRow && !cfg.scenicHome) grid.addItemDecoration(new DockDecoration(");
+        assertContains("Scenic focus does not park the app row at the bottom", activity,
+                "if (scenic != null) {\n            // The Scenic grid is below a separate floating dock");
     }
 
     // ---- Settings backstack --------------------------------------------------------------------

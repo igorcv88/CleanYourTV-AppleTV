@@ -130,6 +130,10 @@ final class ScenicHome implements NowPlaying.Listener {
     private TextView screenTitle;
     private ControlCenter controlCenter;
     private boolean appsShown;
+    /** One reversible animation moves both surfaces; it never changes the dock's permanent Home layout. */
+    private ValueAnimator appsAnimator;
+    private float appsReveal;
+    private int appsDockShift, appsGridTravel;
 
     private final NowPlaying nowPlaying;
     private NowPlaying.Track track;
@@ -426,6 +430,7 @@ final class ScenicHome implements NowPlaying.Listener {
     /** Focus for Home itself (after a reload or coming back from an app). */
     void focusHome() {
         if (listening || panel.getVisibility() == View.VISIBLE || screen.getVisibility() == View.VISIBLE) return;
+        if (appsShown) { a.focusGridAt(-1); return; }
         focusDock(lastDockPos);
     }
 
@@ -442,10 +447,12 @@ final class ScenicHome implements NowPlaying.Listener {
             }
         }
         favourites = Favorites.effective(Favorites.load(a), cfg.dockApps, installed, 6);
+        List<String> visibleDock = Favorites.visible(favourites, byPkg.keySet());
         List<AppAdapter.Entry> shown = new ArrayList<>();
-        for (String p : Favorites.visible(favourites, byPkg.keySet())) shown.add(byPkg.get(p));
+        for (String p : visibleDock) shown.add(byPkg.get(p));
         boolean hadFocus = dock.hasFocus();
         dockAdapter.set(shown);
+        a.setScenicDockPackages(visibleDock);
         if (hadFocus) handler.post(() -> focusDock(lastDockPos));
     }
 
@@ -460,13 +467,15 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void rebuildShelf() {
+        List<String> visibleDock = Favorites.visible(favourites, byPkg.keySet());
         List<AppAdapter.Entry> shown = new ArrayList<>();
-        for (String p : Favorites.visible(favourites, byPkg.keySet())) shown.add(byPkg.get(p));
+        for (String p : visibleDock) shown.add(byPkg.get(p));
         dockAdapter.set(shown);
+        a.setScenicDockPackages(visibleDock);
     }
 
     private void focusDock(int pos) {
-        if (appsShown || dockFrame.getVisibility() != View.VISIBLE) return;
+        if (dockFrame.getVisibility() != View.VISIBLE) return;
         int p = DockNav.restore(pos, dockAdapter.getItemCount());
         RecyclerView.ViewHolder vh = dock.findViewHolderForAdapterPosition(p);
         if (vh != null) {
@@ -480,39 +489,70 @@ final class ScenicHome implements NowPlaying.Listener {
         });
     }
 
-    /** Apps screen on or off: the grid shows under the header, the dock and music group step away. */
+    /** The Apps grid rises from below and lifts the dock to a shelf just beneath the header. */
     void showApps(boolean show, boolean focusGrid) {
         if (appsShown == show) return;
         appsShown = show;
         if (show && controlCenter != null && controlCenter.isOpen()) closeControlCenterNow();
-        // Apps is a separate navigation level. The clock/gear are only on Home, where Up
-        // returns to them; they must not steal focus from the top row of All Apps.
-        header.setVisibility(show ? View.GONE : View.VISIBLE);
+        // The header stays visible and clear of the raised dock. The real grid has a layout inset,
+        // so its cards cannot scroll behind either the clock or the dock.
+        header.setVisibility(View.VISIBLE);
         View gridFrame = a.gridFrame();
+        if (appsAnimator != null) appsAnimator.cancel();
         dim.animate().cancel();
         if (show) {
+            int headerBottom = header.getBottom() > 0 ? header.getBottom() : dp(96);
+            int dockHeight = dockFrame.getHeight() > 0 ? dockFrame.getHeight() : dockFrame.getLayoutParams().height;
+            int dockTop = ScenicAppsMotion.dockTop(headerBottom, dp(12));
+            int gridTop = ScenicAppsMotion.gridTop(dockTop, dockHeight, dp(14));
+            appsDockShift = dockTop - dockFrame.getTop();
+            appsGridTravel = ScenicAppsMotion.entryTravel(root.getHeight(), gridTop, dp(32));
+            ViewGroup.MarginLayoutParams gridLp = (ViewGroup.MarginLayoutParams) gridFrame.getLayoutParams();
+            if (gridLp.topMargin != gridTop) {
+                gridLp.topMargin = gridTop;
+                gridFrame.setLayoutParams(gridLp);
+            }
             dim.setBackground(washCovering() ? appsShade : appsFrost);
             dim.setVisibility(View.VISIBLE);
-        }
-        dim.animate().alpha(show ? 1f : 0f).setDuration(reducedMotion ? 120 : 300)
-                .withEndAction(() -> { if (!appsShown) dim.setVisibility(View.GONE); }).start();
-        if (show) {
-            fade(dockFrame, false, dp(24));
+            gridFrame.setVisibility(View.VISIBLE);
             fade(nowGroup, false, 0);
             fade(ribbon, false, 0);
-            gridFrame.setAlpha(0f);
-            gridFrame.setVisibility(View.VISIBLE);
-            gridFrame.animate().alpha(1f).setDuration(reducedMotion ? 120 : 300).setInterpolator(EASE).start();
-            if (focusGrid) gridFrame.post(() -> a.focusGridAt(0));
-        } else {
-            gridFrame.animate().cancel();
-            gridFrame.setVisibility(View.GONE);
-            fade(dockFrame, true, dp(24));
+        }
+        if (!show) {
             if (track != null) {
                 fade(nowGroup, true, 0);
                 fade(ribbon, true, 0);
             }
         }
+        float start = appsReveal, end = show ? 1f : 0f;
+        appsAnimator = ValueAnimator.ofFloat(start, end);
+        appsAnimator.setDuration(reducedMotion ? 120 : Math.max(120L, Math.round(440 * Math.abs(end - start))));
+        appsAnimator.setInterpolator(reducedMotion ? new DecelerateInterpolator() : EASE);
+        appsAnimator.addUpdateListener(animation -> {
+            appsReveal = (float) animation.getAnimatedValue();
+            dockFrame.setTranslationY(appsDockShift * appsReveal);
+            gridFrame.setTranslationY(appsGridTravel * (1f - appsReveal));
+            gridFrame.setAlpha(ScenicAppsMotion.gridAlpha(appsReveal));
+            dim.setAlpha(appsReveal);
+        });
+        appsAnimator.addListener(new AnimatorListenerAdapter() {
+            boolean cancelled;
+            @Override public void onAnimationCancel(Animator animation) { cancelled = true; }
+            @Override public void onAnimationEnd(Animator animation) {
+                if (cancelled) return;
+                if (appsShown) {
+                    if (focusGrid) a.focusGridAt(0);
+                } else {
+                    gridFrame.setVisibility(View.GONE);
+                    dim.setVisibility(View.GONE);
+                    // Restore the old grid geometry for the next fresh entrance.
+                    ViewGroup.MarginLayoutParams gridLp = (ViewGroup.MarginLayoutParams) gridFrame.getLayoutParams();
+                    gridLp.topMargin = dp(124);
+                    gridFrame.setLayoutParams(gridLp);
+                }
+            }
+        });
+        appsAnimator.start();
     }
 
     private void launch(AppAdapter.Entry e) {
@@ -788,7 +828,15 @@ final class ScenicHome implements NowPlaying.Listener {
         // Moving a dock card: Left/Right move it (the card's key listener), Up/Down stay put.
         if (movingPkg != null && row == ROW_DOCK && (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN)) return true;
         if (appsShown) {
-            if (code == KeyEvent.KEYCODE_DPAD_UP && a.focusedGridIsFirstRow()) {
+            if (code == KeyEvent.KEYCODE_DPAD_UP && row == ROW_NONE && a.focusedGridIsFirstRow()) {
+                focusDock(lastDockPos);
+                return true;
+            }
+            if (row == ROW_DOCK && code == KeyEvent.KEYCODE_DPAD_DOWN) {
+                a.focusGridAt(0);
+                return true;
+            }
+            if (row == ROW_DOCK && code == KeyEvent.KEYCODE_DPAD_UP) {
                 showApps(false, false);
                 handler.post(() -> focusDock(lastDockPos));
                 return true;
