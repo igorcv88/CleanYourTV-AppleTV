@@ -262,4 +262,25 @@ public class ScenicContractTest {
         assertTrue("sheet sits below the header's buttons", ControlCenter.TOP_DP >= 96);
         assertTrue("lift stays inside the 16dp padding", ControlCenter.FOCUS_SCALE <= 1.05f);
     }
+
+    @Test public void controlCenterHasIndividualGlassWithoutAnOuterSheetOrRedundantTvFooter() {
+        String cc = src("ControlCenter.java");
+        assertFalse("no glass applied to the empty outer frame", cc.contains("SceneGlassDrawable.apply(card,"));
+        assertFalse("no extra round glass layer over Wi-Fi and Sound icons", cc.contains("SceneGlassDrawable.apply(disc,"));
+        assertFalse("no duplicate TV settings row", cc.contains("buildFooter();"));
+        assertContains("Wi-Fi and Sound capsules have their own frost", cc,
+                "SceneGlassDrawable.apply(c, 26f, GlassTone.Kind.CONTROL);");
+        assertContains("whole media platter takes focus", cc, "focusable(platter, () -> {");
+        assertContains("left from previous selects the platter", cc, "mediaPlatter.requestFocus();");
+    }
+
+    @Test public void scenicDockCapacityAndReplacementRemainDistinctFromAppGrid() {
+        String scenic = src("ScenicHome.java");
+        String adapter = src("AppAdapter.java");
+        assertContains("dock cap tracks advanced column setting", scenic,
+                "ScenicDockRules.capacity(cfg.columns)");
+        assertContains("All Apps button can be hidden", scenic, "SHOW_ALL_APPS_DOCK_KEY");
+        assertContains("full dock asks the owner which slot to replace", scenic, "replacingPkg = e.pkg;");
+        assertContains("other apps dim during selection", adapter, "scenicReplacementCandidate.equals(e.pkg) ? 1f : 0.28f");
+    }
 }

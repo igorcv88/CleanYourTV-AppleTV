@@ -171,6 +171,15 @@
 
     <!-- Optional Scenic Glass Home, originally developed for this fork. -->
     <string name="scenic_all_apps">All Apps</string>
+    <string name="scenic_replace_choose">Dock full. Choose an app in the Dock to replace with %1$s; Back cancels.</string>
+    <string name="scenic_replaced">%1$s added to the Dock</string>
+    <string name="scenic_backup_save">Save backup to file or Drive</string>
+    <string name="scenic_backup_restore">Restore backup from file or Drive</string>
+    <string name="scenic_backup_confirm">Restore settings from this file? Current Dock, weather, Home and My Space choices will be replaced.</string>
+    <string name="scenic_backup_picker_missing">This TV has no compatible document picker. Google Drive backup is unavailable on this firmware.</string>
+    <string name="scenic_backup_saved">Backup exported successfully</string>
+    <string name="scenic_backup_restored">Settings restored</string>
+    <string name="scenic_backup_failed">Could not read or write the backup</string>
     <string name="scenic_listen">Listen</string>
     <string name="scenic_settings">Settings</string>
     <string name="scenic_tv_settings">TV &amp; Chromecast settings</string>

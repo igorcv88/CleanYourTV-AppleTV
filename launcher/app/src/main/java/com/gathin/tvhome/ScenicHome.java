@@ -76,6 +76,7 @@ import java.util.concurrent.Executors;
  */
 final class ScenicHome implements NowPlaying.Listener {
     static final String PREFS = "scenic_home";
+    static final String SHOW_ALL_APPS_DOCK_KEY = "show_all_apps_dock";
     static final String WALLPAPER_KEY = "wallpaper", GLASS_KEY = "glass";
     /** Opt-in: while music plays over an aerial, a smaller (cheaper, more diffuse) live frost. */
     static final String MUSIC_FROST_KEY = "light_frost_with_music";
@@ -155,6 +156,7 @@ final class ScenicHome implements NowPlaying.Listener {
     private List<String> favourites;
     private final Map<String, AppAdapter.Entry> byPkg = new HashMap<>();
     private String movingPkg;
+    private String replacingPkg;
     private int lastDockPos;
     private PopupWindow menu;
 
@@ -450,8 +452,9 @@ final class ScenicHome implements NowPlaying.Listener {
                 installed.add(e.pkg);
             }
         }
-        favourites = Favorites.effective(Favorites.load(a), cfg.dockApps, installed, 6);
-        List<String> visibleDock = Favorites.visible(favourites, byPkg.keySet());
+        favourites = Favorites.effective(Favorites.load(a), cfg.dockApps, installed,
+                ScenicDockRules.capacity(cfg.columns));
+        List<String> visibleDock = ScenicDockRules.takeVisible(Favorites.visible(favourites, byPkg.keySet()), dockCapacity());
         List<AppAdapter.Entry> shown = new ArrayList<>();
         for (String p : visibleDock) shown.add(byPkg.get(p));
         boolean hadFocus = dock.hasFocus();
@@ -463,6 +466,14 @@ final class ScenicHome implements NowPlaying.Listener {
     boolean toggleFavourite(AppAdapter.Entry e) {
         if (favourites == null) return false;
         boolean adding = !favourites.contains(e.pkg);
+        if (adding && ScenicDockRules.needsReplacement(
+                Favorites.visible(favourites, byPkg.keySet()), e.pkg, dockCapacity())) {
+            replacingPkg = e.pkg;
+            a.setScenicReplacementCandidate(e.pkg);
+            Toast.makeText(a, a.getString(R.string.scenic_replace_choose, e.label), Toast.LENGTH_LONG).show();
+            handler.post(() -> focusDock(Math.min(lastDockPos, dockAdapter.favouriteCount() - 1)));
+            return true;
+        }
         favourites = Favorites.toggle(favourites, e.pkg);
         Favorites.save(a, favourites);
         rebuildShelf();
@@ -471,11 +482,37 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void rebuildShelf() {
-        List<String> visibleDock = Favorites.visible(favourites, byPkg.keySet());
+        List<String> visibleDock = ScenicDockRules.takeVisible(Favorites.visible(favourites, byPkg.keySet()), dockCapacity());
         List<AppAdapter.Entry> shown = new ArrayList<>();
         for (String p : visibleDock) shown.add(byPkg.get(p));
         dockAdapter.set(shown);
         a.setScenicDockPackages(visibleDock);
+    }
+
+    private int dockCapacity() { return ScenicDockRules.capacity(cfg.columns); }
+
+    private boolean showAllAppsDock() { return prefs().getBoolean(SHOW_ALL_APPS_DOCK_KEY, true); }
+
+    private void finishReplace(String oldPkg) {
+        if (replacingPkg == null) return;
+        String newPkg = replacingPkg;
+        favourites = ScenicDockRules.replace(favourites, oldPkg, newPkg);
+        Favorites.save(a, favourites);
+        cancelReplace();
+        rebuildShelf();
+        Toast.makeText(a, a.getString(R.string.scenic_replaced, byPkg.get(newPkg).label), Toast.LENGTH_SHORT).show();
+        handler.post(() -> focusDock(dockAdapter.indexOf(newPkg)));
+    }
+
+    private void cancelReplace() {
+        replacingPkg = null;
+        a.setScenicReplacementCandidate(null);
+    }
+
+    private void cancelReplaceAndReturn() {
+        String previous = replacingPkg;
+        cancelReplace();
+        if (appsShown) a.focusScenicGridPackage(previous);
     }
 
     private void focusDock(int pos) {
@@ -598,11 +635,11 @@ final class ScenicHome implements NowPlaying.Listener {
         }
 
         @Override public long getItemId(int pos) {
-            return DockNav.isAllApps(pos, items.size()) ? Long.MAX_VALUE : items.get(pos).pkg.hashCode();
+            return showAllAppsDock() && DockNav.isAllApps(pos, items.size()) ? Long.MAX_VALUE : items.get(pos).pkg.hashCode();
         }
 
         @Override public int getItemCount() {
-            return DockNav.count(items.size());
+            return items.size() + (showAllAppsDock() ? 1 : 0);
         }
 
         @NonNull @Override
@@ -618,7 +655,7 @@ final class ScenicHome implements NowPlaying.Listener {
 
         @Override
         public void onBindViewHolder(@NonNull Holder h, int pos) {
-            boolean allApps = DockNav.isAllApps(pos, items.size());
+            boolean allApps = showAllAppsDock() && DockNav.isAllApps(pos, items.size());
             h.card.setContentDescription(allApps ? a.getString(R.string.scenic_all_apps) : items.get(pos).label);
             if (allApps) {
                 // A control, not an app: frosted glass, the grid icon and its caption.
@@ -672,7 +709,11 @@ final class ScenicHome implements NowPlaying.Listener {
                     int pos = getBindingAdapterPosition();
                     if (pos == RecyclerView.NO_POSITION) return;
                     if (movingPkg != null) { endMove(); return; }
-                    if (DockNav.isAllApps(pos, items.size())) {
+                    if (replacingPkg != null) {
+                        if (pos < items.size()) finishReplace(items.get(pos).pkg);
+                        return;
+                    }
+                    if (showAllAppsDock() && DockNav.isAllApps(pos, items.size())) {
                         a.playOpenSound();
                         showApps(true, true);
                     } else {
@@ -681,7 +722,8 @@ final class ScenicHome implements NowPlaying.Listener {
                 });
                 card.setOnLongClickListener(x -> {
                     int pos = getBindingAdapterPosition();
-                    if (pos == RecyclerView.NO_POSITION || DockNav.isAllApps(pos, items.size())) return false;
+                    if (pos == RecyclerView.NO_POSITION || replacingPkg != null
+                            || (showAllAppsDock() && DockNav.isAllApps(pos, items.size()))) return false;
                     showDockMenu(card, items.get(pos));
                     return true;
                 });
@@ -700,6 +742,10 @@ final class ScenicHome implements NowPlaying.Listener {
                     int pos = getBindingAdapterPosition();
                     if (pos == RecyclerView.NO_POSITION) return false;
                     boolean left = code == KeyEvent.KEYCODE_DPAD_LEFT, rightKey = code == KeyEvent.KEYCODE_DPAD_RIGHT;
+                    if (replacingPkg != null) {
+                        if (code == KeyEvent.KEYCODE_BACK) { cancelReplaceAndReturn(); return true; }
+                        return code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN;
+                    }
                     if (movingPkg != null) {
                         if (left || rightKey) {
                             moveFavourite(left ? -1 : 1);
@@ -719,7 +765,7 @@ final class ScenicHome implements NowPlaying.Listener {
                             return false;
                         }
                     }
-                    if (code == KeyEvent.KEYCODE_MENU && !DockNav.isAllApps(pos, items.size())) {
+                    if (code == KeyEvent.KEYCODE_MENU && !(showAllAppsDock() && DockNav.isAllApps(pos, items.size()))) {
                         showDockMenu(card, items.get(pos));
                         return true;
                     }
@@ -802,6 +848,8 @@ final class ScenicHome implements NowPlaying.Listener {
         if (ev.getAction() != KeyEvent.ACTION_DOWN) return false;
         int code = ev.getKeyCode();
         View f = a.getCurrentFocus();
+        if (replacingPkg != null && isInside(f, dock)
+                && (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN)) return true;
         if (listening) return listenKey(f, code);
         if (controlCenter != null && controlCenter.isOpen()) {
             if (!isDpad(code)) return false;
@@ -970,6 +1018,7 @@ final class ScenicHome implements NowPlaying.Listener {
     /** Back: the top overlay closes and gives focus back. False when Home has nothing open. */
     boolean onBack() {
         if (menu != null) { menu.dismiss(); return true; }
+        if (replacingPkg != null) { cancelReplaceAndReturn(); return true; }
         if (controlCenter != null && controlCenter.isOpen()) { closeControlCenter(); return true; }
         if (movingPkg != null) { endMove(); return true; }
         if (listening) { closeListen(); return true; }
@@ -988,6 +1037,7 @@ final class ScenicHome implements NowPlaying.Listener {
         if (menu != null) menu.dismiss();
         if (controlCenter != null) controlCenter.close(false);
         endMove();
+        cancelReplace();
         if (listening) {
             if (listenAnim != null) listenAnim.cancel();
             finishListenClose();
@@ -1487,7 +1537,7 @@ final class ScenicHome implements NowPlaying.Listener {
 
     private void buildControlCenter() {
         controlCenter = new ControlCenter(a, layer, regular, medium, reducedMotion, new ControlCenter.Actions() {
-            @Override public void network() { quickAction(a::openNetworkSettings); }
+            @Override public void network() { quickAction(ScenicHome.this::openQuickNetwork); }
             @Override public void sound() { quickAction(() -> a.openIntent(new Intent(Settings.ACTION_SOUND_SETTINGS))); }
             @Override public boolean hasInputs() { return a.hasInputs(); }
             @Override public void inputs() { quickAction(a::showInputsMenu); }
@@ -1499,13 +1549,37 @@ final class ScenicHome implements NowPlaying.Listener {
                 });
             }
             @Override public void tvSettings() { quickAction(a::openTvSettings); }
-            @Override public void listen() { quickAction(ScenicHome.this::openListen); }
+            @Override public void listen() { quickAction(ScenicHome.this::openCurrentMediaApp); }
             @Override public void musicAccess() { quickAction(ScenicHome.this::openMusicAccess); }
             // Transport keeps the sheet open: the same session commands as the Home buttons.
             @Override public void previous() { nowPlaying.previous(); }
             @Override public void togglePlay() { nowPlaying.togglePlay(); }
             @Override public void next() { nowPlaying.next(); }
         });
+    }
+
+    /** The Control Center's full media card opens the owning app; Home's Listen action is separate. */
+    private void openCurrentMediaApp() {
+        if (track == null || track.pkg == null) { openMusicAccess(); return; }
+        AppAdapter.Entry entry = byPkg.get(track.pkg);
+        if (entry != null) { launch(entry); return; }
+        Intent i = a.getPackageManager().getLeanbackLaunchIntentForPackage(track.pkg);
+        if (i == null) i = a.getPackageManager().getLaunchIntentForPackage(track.pkg);
+        if (i != null) a.openIntent(i);
+        else openListen();
+    }
+
+    /** Read-only connectivity page, with a real system Wi-Fi management action on unprivileged TVs. */
+    private void openQuickNetwork() {
+        openScreen(a.getString(R.string.scenic_network), this::openQuickNetwork);
+        NetworkSummary state = networkSummary();
+        heading("Connection");
+        note(state.title + " · " + state.detail);
+        note("Wi-Fi power and joining networks require TV system permissions. "
+                + "Use the device's network controls to connect or disconnect.");
+        screenContent.addView(row("Manage Wi-Fi networks", null,
+                () -> { closeScreenNow(); a.openNetworkSettings(); }));
+        focusFirstRow();
     }
 
     /** Only while the sheet is open; opening it syncs first. */
@@ -1527,10 +1601,36 @@ final class ScenicHome implements NowPlaying.Listener {
         if (controlCenter.isOpen()) { closeControlCenter(); return; }
         focusMemory.push("quick", a.getCurrentFocus());
         controlCenter.setNetwork(networkSummary());
+        controlCenter.setSoundOutput(soundOutputLabel());
         controlCenter.setFooter(controlCenterFooter());
         controlCenter.open();
         syncControlCenterMedia();
         a.playOpenSound();
+    }
+
+    /** Best available connected output label; routing decisions remain the TV's responsibility. */
+    private String soundOutputLabel() {
+        android.media.AudioManager audio = a.getSystemService(android.media.AudioManager.class);
+        if (audio == null) return "TV audio";
+        android.media.AudioDeviceInfo[] devices = audio.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS);
+        String output = "TV speakers";
+        for (android.media.AudioDeviceInfo device : devices) {
+            switch (device.getType()) {
+                case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP:
+                case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO:
+                    return device.getProductName() == null ? "Bluetooth audio" : device.getProductName().toString();
+                case android.media.AudioDeviceInfo.TYPE_HDMI_ARC:
+                case android.media.AudioDeviceInfo.TYPE_HDMI_EARC:
+                    output = "HDMI audio";
+                    break;
+                case android.media.AudioDeviceInfo.TYPE_HDMI:
+                    output = "HDMI output";
+                    break;
+                default:
+                    break;
+            }
+        }
+        return output;
     }
 
     private void closeControlCenter() {
@@ -2313,6 +2413,11 @@ final class ScenicHome implements NowPlaying.Listener {
             prefs().edit().putString(GLASS_KEY, "clear".equals(glass) ? "frosted" : "clear").apply();
             a.recreate();
         }));
+        screenContent.addView(row("All Apps button in Dock", showAllAppsDock() ? "On" : "Off", () -> {
+            prefs().edit().putBoolean(SHOW_ALL_APPS_DOCK_KEY, !showAllAppsDock()).apply();
+            dockAdapter.notifyDataSetChanged();
+            openAppearance();
+        }));
         boolean lightFrost = prefs().getBoolean(MUSIC_FROST_KEY, false);
         screenContent.addView(row("Lighter glass with music", lightFrost ? "On" : "Off", () -> {
             prefs().edit().putBoolean(MUSIC_FROST_KEY, !lightFrost).apply();
@@ -2401,10 +2506,17 @@ final class ScenicHome implements NowPlaying.Listener {
 
     private void openBackup() {
         openScreen(a.getString(R.string.scenic_backup), this::openBackup);
-        note("Dock favourites, My Space, weather place and Home choices are stored only on this TV (no account, no "
-                + "cloud), and are lost if the launcher's data is cleared.\n\nRecovery: the project's tools "
-                + "(tools/restore.sh, tools/recovery.py) re-enable the TV's own launcher over ADB if this Home ever "
-                + "fails; install a new build before removing anything, and keep the stock launcher installed.");
+        note("Export Dock favourites, My Space, weather and Home settings as a JSON document. "
+                + "Select Google Drive in your TV's file picker if available; that provider uses its own signed-in "
+                + "Google account. Some TV firmware has no document picker or Drive provider. "
+                + "No account details are read by Scenic.");
+        screenContent.addView(row(a.getString(R.string.scenic_backup_save), null,
+                () -> a.scenicBackupDocument(false)));
+        screenContent.addView(row(a.getString(R.string.scenic_backup_restore), null,
+                () -> a.scenicBackupDocument(true)));
+        note("Restore replaces current Scenic settings after confirmation. Keep a copy somewhere outside the TV. "
+                + "If Home fails, the project's tools/restore.sh and tools/recovery.py can restore the stock launcher "
+                + "using ADB; this settings backup cannot repair a broken Home installation.");
         focusFirstRow();
     }
 
