@@ -77,6 +77,8 @@ import java.util.concurrent.Executors;
 final class ScenicHome implements NowPlaying.Listener {
     static final String PREFS = "scenic_home";
     static final String WALLPAPER_KEY = "wallpaper", GLASS_KEY = "glass";
+    /** Keep silent aerials by default; album art is an opt-in playback backdrop. */
+    static final String MUSIC_BACKDROP_KEY = "music_backdrop";
 
     private static final Interpolator EASE = new PathInterpolator(0.2f, 0.9f, 0.3f, 1f);
     private static final long PANEL_MS = 360, LISTEN_MS = 420;
@@ -122,7 +124,11 @@ final class ScenicHome implements NowPlaying.Listener {
     private ScrollView panelScroll;
     private FrameLayout screen;
     private LinearLayout screenContent;
+    private ScrollView screenScroll;
     private TextView screenTitle;
+    private FrameLayout quickPanel;
+    private LinearLayout quickRows;
+    private TextView quickMedia;
     private boolean appsShown;
 
     private final NowPlaying nowPlaying;
@@ -207,10 +213,15 @@ final class ScenicHome implements NowPlaying.Listener {
         clock.setShadowLayer(dp(6), 0, dp(1), 0x40000000);
         clock.setIncludeFontPadding(false);
         right.addView(clock);
+        ImageView quick = roundButton(R.drawable.ic_quick_controls, 48, "Control Center");
+        LinearLayout.LayoutParams quickLp = new LinearLayout.LayoutParams(dp(48), dp(48));
+        quickLp.setMarginStart(dp(18));
+        right.addView(quick, quickLp);
+        quick.setOnClickListener(v -> openQuickPanel());
         ImageView gear = roundButton(R.drawable.ic_settings, 48, a.getString(R.string.scenic_settings));
         settingsButton = gear;
         LinearLayout.LayoutParams gearLp = new LinearLayout.LayoutParams(dp(48), dp(48));
-        gearLp.setMarginStart(dp(20));
+        gearLp.setMarginStart(dp(12));
         right.addView(gear, gearLp);
         gear.setOnClickListener(v -> openPanel());
 
@@ -319,7 +330,7 @@ final class ScenicHome implements NowPlaying.Listener {
         btnListen.setTextColor(a.getColorStateList(R.color.scenic_row_text));
         btnListen.setGravity(Gravity.CENTER);
         btnListen.setPadding(dp(22), 0, dp(22), 0);
-        btnListen.setBackgroundResource(R.drawable.scenic_pill_bg);
+        btnListen.setBackground(new SceneGlassDrawable(btnListen, -1f, 0x30131C2B));
         btnListen.setFocusable(true);
         btnListen.setClickable(true);
         LinearLayout.LayoutParams listenLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44));
@@ -330,6 +341,7 @@ final class ScenicHome implements NowPlaying.Listener {
 
         buildPanel();
         buildScreen();
+        buildQuickPanel();
         // The original Apps RecyclerView belongs to a weighted LinearLayout. Its classic
         // header is gone in Scenic, so reserve a real layout inset (not a translation)
         // before the first row: scrolling and D-pad focus must never slide under the clock.
@@ -461,6 +473,10 @@ final class ScenicHome implements NowPlaying.Listener {
     void showApps(boolean show, boolean focusGrid) {
         if (appsShown == show) return;
         appsShown = show;
+        if (show && quickPanel != null && quickPanel.getVisibility() == View.VISIBLE) closeQuickPanelNow();
+        // Apps is a separate navigation level. The clock/gear are only on Home, where Up
+        // returns to them; they must not steal focus from the top row of All Apps.
+        header.setVisibility(show ? View.GONE : View.VISIBLE);
         View gridFrame = a.gridFrame();
         dim.animate().cancel();
         if (show) dim.setVisibility(View.VISIBLE);
@@ -554,12 +570,16 @@ final class ScenicHome implements NowPlaying.Listener {
                 h.icon.setVisibility(View.VISIBLE);
                 h.label.setText(R.string.scenic_all_apps);
                 h.label.setVisibility(View.VISIBLE);
-                h.card.setBackground(new LiquidGlassDrawable(16f, 0x33FFFFFF));
+                if (!(h.card.getBackground() instanceof SceneGlassDrawable))
+                    h.card.setBackground(new SceneGlassDrawable(h.card, 16f, 0x33FFFFFF));
             } else {
                 AppAdapter.Entry e = items.get(pos);
                 if (h.card.getTag(R.id.tile_bg_orig) == null) h.card.setTag(R.id.tile_bg_orig, a.getDrawable(R.drawable.tile_bg));
                 BannerFit.bind(h.card, h.banner, h.icon, h.label, e, tileW, tileH, dp(16), false);
             }
+            // The reflective rim is already part of the glass material. The separate
+            // ShineView gave All Apps a visibly stacked third sheet during focus.
+            h.glare.setVisibility(allApps ? View.GONE : View.VISIBLE);
             h.card.setForeground(movingPkg != null && !allApps && items.get(pos).pkg.equals(movingPkg)
                     ? a.getDrawable(R.drawable.scenic_moving_ring) : null);
             boolean focused = h.card.isFocused();
@@ -646,7 +666,7 @@ final class ScenicHome implements NowPlaying.Listener {
         LinearLayout rows = new LinearLayout(a);
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setPadding(dp(10), dp(10), dp(10), dp(10));
-        rows.setBackground(new LiquidGlassDrawable.Panel());
+        rows.setBackground(new SceneGlassDrawable(rows, 22f, 0x45131C2B));
         PopupWindow p = new PopupWindow(rows, dp(240), ViewGroup.LayoutParams.WRAP_CONTENT, true);
         menu = p;
         p.setOnDismissListener(() -> { if (menu == p) menu = null; });
@@ -715,6 +735,11 @@ final class ScenicHome implements NowPlaying.Listener {
         int code = ev.getKeyCode();
         View f = a.getCurrentFocus();
         if (listening) return listenKey(f, code);
+        if (quickPanel != null && quickPanel.getVisibility() == View.VISIBLE) {
+            if (!isDpad(code)) return false;
+            View next = f == null ? null : f.focusSearch(direction(code));
+            return next == null || !isInside(next, quickPanel);
+        }
         if (panel.getVisibility() == View.VISIBLE || screen.getVisibility() == View.VISIBLE) {
             // Keep focus inside the open overlay.
             if (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT
@@ -722,6 +747,9 @@ final class ScenicHome implements NowPlaying.Listener {
                 if (panel.getVisibility() == View.VISIBLE
                         && (code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_DPAD_UP)
                         && movePanelFocus(f, code == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1)) return true;
+                if (screen.getVisibility() == View.VISIBLE
+                        && (code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_DPAD_UP)
+                        && moveScreenFocus(f, code == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1)) return true;
                 // A text field moves its own caret with Left/Right.
                 if (f instanceof EditText && (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT)) return false;
                 View container = panel.getVisibility() == View.VISIBLE ? panel : screen;
@@ -734,12 +762,11 @@ final class ScenicHome implements NowPlaying.Listener {
         // Moving a dock card: Left/Right move it (the card's key listener), Up/Down stay put.
         if (movingPkg != null && row == ROW_DOCK && (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN)) return true;
         if (appsShown) {
-            if (row == ROW_HEADER && code == KeyEvent.KEYCODE_DPAD_DOWN) {
-                a.focusGridAt(-1);
+            if (code == KeyEvent.KEYCODE_DPAD_UP && a.focusedGridIsFirstRow()) {
+                showApps(false, false);
+                handler.post(() -> focusDock(lastDockPos));
                 return true;
             }
-            if (row == ROW_HEADER && (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT
-                    || code == KeyEvent.KEYCODE_DPAD_UP)) return true;
             return false;
         }
         if (row == ROW_NONE) {
@@ -788,7 +815,10 @@ final class ScenicHome implements NowPlaying.Listener {
             }
         }
         if (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
-            if (row == ROW_HEADER) return true;
+            if (row == ROW_HEADER) {
+                View next = f.focusSearch(direction(code));
+                return next == null || !isInside(next, header);
+            }
             if (row == ROW_CONTROLS) {
                 View next = f.focusSearch(direction(code));
                 if (next == null || !isInside(next, nowGroup)) return true;
@@ -817,6 +847,23 @@ final class ScenicHome implements NowPlaying.Listener {
         return true;
     }
 
+    /** Explicit vertical D-pad order also works when an EditText consumes Up/Down. */
+    private boolean moveScreenFocus(View focused, int step) {
+        int current = -1;
+        for (int i = 0; i < screenContent.getChildCount(); i++) {
+            if (isInside(focused, screenContent.getChildAt(i))) { current = i; break; }
+        }
+        if (current < 0) return false;
+        for (int i = current + step; i >= 0 && i < screenContent.getChildCount(); i += step) {
+            View candidate = screenContent.getChildAt(i);
+            if (candidate.getVisibility() != View.VISIBLE) continue;
+            if (candidate.isFocusable() && candidate.requestFocus()) return true;
+            if (candidate instanceof ViewGroup && focusFirst((ViewGroup) candidate)) return true;
+        }
+        if (step < 0) screenScroll.smoothScrollTo(0, 0);
+        return true;
+    }
+
     private void focusControls() {
         if (lastControl != null && lastControl.getVisibility() == View.VISIBLE && isInside(lastControl, nowGroup)) {
             lastControl.requestFocus();
@@ -842,6 +889,7 @@ final class ScenicHome implements NowPlaying.Listener {
     /** Back: the top overlay closes and gives focus back. False when Home has nothing open. */
     boolean onBack() {
         if (menu != null) { menu.dismiss(); return true; }
+        if (quickPanel != null && quickPanel.getVisibility() == View.VISIBLE) { closeQuickPanel(); return true; }
         if (movingPkg != null) { endMove(); return true; }
         if (listening) { closeListen(); return true; }
         if (screen.getVisibility() == View.VISIBLE) { closeScreen(); return true; }
@@ -856,6 +904,7 @@ final class ScenicHome implements NowPlaying.Listener {
 
     private void closeAllOverlays() {
         if (menu != null) menu.dismiss();
+        if (quickPanel != null) quickPanel.setVisibility(View.GONE);
         endMove();
         if (listening) {
             if (listenAnim != null) listenAnim.cancel();
@@ -870,8 +919,15 @@ final class ScenicHome implements NowPlaying.Listener {
 
     @Override
     public void onNowPlaying(NowPlaying.Track t) {
+        // Spotify's advanced mixes run inside Spotify. Never mix a muted aerial AudioTrack into the
+        // same output: if a video-only copy is unavailable, the wallpaper yields to playback.
+        a.setAerialAudioPlaying(t != null && (MediaTime.advancing(t.state)
+                || t.state == MediaTime.STATE_BUFFERING));
         NowPlaying.Track old = track;
         track = t;
+        if (quickMedia != null) {
+            quickMedia.setText(t == null ? "No music playing" : t.title + "\n" + (t.artist == null ? "" : t.artist));
+        }
         if (t == null) {
             ribbon.setPlaying(false);
             ribbon.setArtwork(null);
@@ -918,8 +974,22 @@ final class ScenicHome implements NowPlaying.Listener {
         }
         // While the new cover decodes, the previous track's wash stays (no flash of the wallpaper between tracks);
         // it changes once the art is ready, or fades out if the track turns out to have none.
-        if (!t.artPending && (old == null || t.blurredArt != old.blurredArt)) showWash(t.blurredArt);
+        syncMusicBackdrop();
         startTick();
+    }
+
+    private void syncMusicBackdrop() {
+        NowPlaying.Track current = track;
+        if (current == null) { showWash(null); return; }
+        boolean playing = MediaTime.advancing(current.state) || current.state == MediaTime.STATE_BUFFERING;
+        boolean preferArt = "art".equals(prefs().getString(MUSIC_BACKDROP_KEY, "aerial"));
+        // If a silent video cannot be made, cover the suspended aerial with available artwork
+        // rather than leaving a black frame while preserving Spotify's mixing engine.
+        if (!playing || (!preferArt && !a.aerialNeedsArtworkFallback())) {
+            showWash(null);
+        } else if (!current.artPending) {
+            showWash(current.blurredArt, current.glassArt);
+        }
     }
 
     /** The track's cover, or (no art yet, or none at all) the music glyph on glass: never the previous cover. */
@@ -931,7 +1001,8 @@ final class ScenicHome implements NowPlaying.Listener {
         } else {
             view.setImageResource(R.drawable.ic_music);
             view.setScaleType(ImageView.ScaleType.CENTER);
-            view.setBackground(new LiquidGlassDrawable(radiusDp, 0x33FFFFFF));
+            if (!(view.getBackground() instanceof SceneGlassDrawable))
+                view.setBackground(new SceneGlassDrawable(view, radiusDp, 0x33FFFFFF));
         }
     }
 
@@ -945,8 +1016,19 @@ final class ScenicHome implements NowPlaying.Listener {
         return wash.getVisibility() == View.VISIBLE && wash.getAlpha() >= 1f;
     }
 
+    private Bitmap washSource;
+    private boolean washDesired;
+
     private void showWash(Bitmap blurred) {
-        Scene.setMusic(blurred);
+        showWash(blurred, null);
+    }
+
+    private void showWash(Bitmap blurred, Bitmap glassArt) {
+        Scene.setMusic(blurred == null ? null : glassArt);
+        boolean wantWash = blurred != null;
+        if (blurred == washSource && wantWash == washDesired) return;
+        washSource = blurred;
+        washDesired = wantWash;
         wash.animate().cancel();
         if (blurred == null) {
             if (wash.getVisibility() != View.VISIBLE) return;
@@ -963,12 +1045,15 @@ final class ScenicHome implements NowPlaying.Listener {
         wash.setVisibility(View.VISIBLE);
         // Fully covered by the wash: the aerial's decoder has nothing to show, so it is released until the
         // music stops (AerialBackdrop keeps the position).
-        wash.animate().alpha(1f).setDuration(reducedMotion ? 150 : 450).withEndAction(a::pauseAerial).start();
+        wash.animate().alpha(1f).setDuration(reducedMotion ? 150 : 450).withEndAction(() -> {
+            if (washSource == blurred && wash.getVisibility() == View.VISIBLE) a.pauseAerial();
+        }).start();
     }
 
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             updateProgress();
+            syncMusicBackdrop();
             if (resumed && track != null && MediaTime.advancing(track.state)) handler.postDelayed(this, 1000);
         }
     };
@@ -1047,7 +1132,7 @@ final class ScenicHome implements NowPlaying.Listener {
         openApp.setTextColor(a.getColorStateList(R.color.scenic_row_text));
         openApp.setGravity(Gravity.CENTER);
         openApp.setPadding(dp(22), 0, dp(22), 0);
-        openApp.setBackgroundResource(R.drawable.scenic_pill_bg);
+        openApp.setBackground(new SceneGlassDrawable(openApp, -1f, 0x2AFFFFFF));
         openApp.setFocusable(true);
         openApp.setClickable(true);
         LinearLayout.LayoutParams oa = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44));
@@ -1301,6 +1386,121 @@ final class ScenicHome implements NowPlaying.Listener {
         restoreFocus("panel");
     }
 
+    // ---- Control Center: actual TV shortcuts, never simulated Wi-Fi/audio toggles -----------------
+
+    private void buildQuickPanel() {
+        quickPanel = new FrameLayout(a);
+        quickPanel.setVisibility(View.GONE);
+        quickPanel.setBackgroundColor(0x18000000);
+        quickPanel.setElevation(dp(40));
+        layer.addView(quickPanel, full());
+
+        LinearLayout card = new LinearLayout(a);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(18), dp(20), dp(18), dp(18));
+        card.setBackground(new SceneGlassDrawable(card, 28f, 0x45131C2B));
+        card.setOutlineProvider(rounded(28));
+        card.setClipToOutline(true);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(430),
+                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
+        lp.setMargins(0, dp(88), dp(42), 0);
+        quickPanel.addView(card, lp);
+
+        TextView title = text(24, display, TEXT);
+        title.setText("Control Center");
+        title.setPadding(dp(12), 0, 0, dp(16));
+        card.addView(title);
+
+        quickRows = new LinearLayout(a);
+        quickRows.setOrientation(LinearLayout.VERTICAL);
+        card.addView(quickRows);
+
+        addQuickPair("Network", "Wi-Fi settings", () -> a.openNetworkSettings(),
+                "Audio", "TV sound settings", () -> a.openIntent(new Intent(Settings.ACTION_SOUND_SETTINGS)));
+        addQuickPair("Inputs", "TV sources", () -> a.showInputsMenu(),
+                "Wallpaper", "Scenery & collections", this::openWallpapers);
+        addQuickPair("Weather", "City & units", this::openWeather,
+                "Settings", "TV & Chromecast", () -> a.openTvSettings());
+
+        quickMedia = text(15, medium, TEXT);
+        quickMedia.setSingleLine(false);
+        quickMedia.setMaxLines(2);
+        quickMedia.setGravity(Gravity.CENTER_VERTICAL);
+        quickMedia.setPadding(dp(18), dp(8), dp(18), dp(8));
+        quickMedia.setText("No music playing");
+        quickMedia.setBackground(new SceneGlassDrawable(quickMedia, 18f, 0x30131C2B));
+        quickMedia.setFocusable(true);
+        quickMedia.setClickable(true);
+        LinearLayout.LayoutParams mediaLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(62));
+        mediaLp.topMargin = dp(10);
+        quickRows.addView(quickMedia, mediaLp);
+        quickMedia.setOnClickListener(v -> quickAction(() -> {
+            if (track != null) openListen(); else openMusicAccess();
+        }));
+        focusMotion(quickMedia);
+    }
+
+    private void addQuickPair(String leftTitle, String leftStatus, Runnable leftAction,
+                              String rightTitle, String rightStatus, Runnable rightAction) {
+        LinearLayout pair = new LinearLayout(a);
+        LinearLayout.LayoutParams pairLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(72));
+        pairLp.bottomMargin = dp(10);
+        quickRows.addView(pair, pairLp);
+        quickTile(pair, leftTitle, leftStatus, leftAction, false);
+        quickTile(pair, rightTitle, rightStatus, rightAction, true);
+    }
+
+    private void quickTile(LinearLayout pair, String title, String status, Runnable action, boolean second) {
+        TextView tile = text(17, medium, TEXT);
+        tile.setText(title + "\n" + status);
+        tile.setSingleLine(false);
+        tile.setMaxLines(2);
+        tile.setLineSpacing(dp(4), 1f);
+        tile.setGravity(Gravity.CENTER_VERTICAL);
+        tile.setPadding(dp(16), 0, dp(8), 0);
+        tile.setBackground(new SceneGlassDrawable(tile, 18f, 0x30131C2B));
+        tile.setFocusable(true);
+        tile.setClickable(true);
+        tile.setOnClickListener(v -> quickAction(action));
+        focusMotion(tile);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+        if (second) lp.setMarginStart(dp(10));
+        pair.addView(tile, lp);
+    }
+
+    private void openQuickPanel() {
+        if (quickPanel.getVisibility() == View.VISIBLE) { closeQuickPanel(); return; }
+        focusMemory.push("quick", a.getCurrentFocus());
+        quickPanel.setVisibility(View.VISIBLE);
+        quickPanel.setAlpha(0f);
+        quickPanel.setTranslationY(-dp(16));
+        quickPanel.animate().alpha(1f).translationY(0f).setDuration(reducedMotion ? 120 : PANEL_MS)
+                .setInterpolator(EASE).start();
+        if (track != null) quickMedia.setText(track.title + "\n" + (track.artist == null ? "" : track.artist));
+        a.playOpenSound();
+        quickRows.getChildAt(0).post(() -> focusFirst(quickRows));
+    }
+
+    private void closeQuickPanel() {
+        quickPanel.animate().cancel();
+        quickPanel.animate().alpha(0f).translationY(-dp(16)).setDuration(reducedMotion ? 100 : 220)
+                .withEndAction(() -> quickPanel.setVisibility(View.GONE)).start();
+        restoreFocus("quick");
+    }
+
+    private void closeQuickPanelNow() {
+        quickPanel.animate().cancel();
+        quickPanel.setVisibility(View.GONE);
+        restoreFocus("quick");
+    }
+
+    private void quickAction(Runnable action) {
+        closeQuickPanelNow();
+        action.run();
+    }
+
     private void restoreFocus(String layerName) {
         if (!layerName.equals(focusMemory.top())) return;
         View back = focusMemory.pop();
@@ -1315,6 +1515,9 @@ final class ScenicHome implements NowPlaying.Listener {
         screen = new FrameLayout(a);
         screen.setVisibility(View.GONE);
         screen.setBackgroundColor(0x33000000);
+        // This entire layer must be above the dock's elevated RecyclerView. Raising
+        // only the child box does not beat the dock's parent Z-order on Android TV 11.
+        screen.setElevation(dp(32));
         layer.addView(screen, full());
         LinearLayout box = new LinearLayout(a);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -1329,12 +1532,14 @@ final class ScenicHome implements NowPlaying.Listener {
         screenTitle = text(30, display, TEXT);
         box.addView(screenTitle);
         ScrollView scroll = new ScrollView(a);
+        screenScroll = scroll;
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setClipToPadding(false);
         screenContent = new LinearLayout(a);
         screenContent.setOrientation(LinearLayout.VERTICAL);
         screenContent.setPadding(0, dp(16), 0, dp(8));
         scroll.addView(screenContent);
+        // Give the scrollable list all space beneath the fixed heading.
         LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
         box.addView(scroll, sl);
     }
@@ -1362,6 +1567,7 @@ final class ScenicHome implements NowPlaying.Listener {
         }
         screenTitle.setText(title);
         screenContent.removeAllViews();
+        screenScroll.scrollTo(0, 0);
     }
 
     private void closeScreen() {
@@ -1597,6 +1803,16 @@ final class ScenicHome implements NowPlaying.Listener {
             a.recreate();
         }));
         if (aerials) screenContent.addView(row("Download more aerials", null, () -> { closeScreenNow(); a.showAerialDownloads(); }));
+        heading("Background while music plays");
+        String musicBackdrop = p.getString(MUSIC_BACKDROP_KEY, "aerial");
+        screenContent.addView(choiceRow("Keep the aerial video", "Default",
+                !"art".equals(musicBackdrop), () -> chooseMusicBackdrop("aerial")));
+        screenContent.addView(choiceRow("Lightly blurred album artwork", null,
+                "art".equals(musicBackdrop), () -> chooseMusicBackdrop("art")));
+        note("Aerials are played without an audio track when the TV supports video-only playback. "
+                + "If the TV cannot isolate the video, album artwork replaces it automatically during music "
+                + "to protect Spotify's mixing effects. You can also choose artwork all the time to reduce "
+                + "video decoding. Pausing music returns to the selected wallpaper.");
         heading("Scenic photo collections");
         String selectedGroup = p.getString(ScenicWallpaperPlayer.GROUP, "all");
         screenContent.addView(choiceRow("All collections · Shuffle", "HD & downloaded 4K",
@@ -1624,6 +1840,13 @@ final class ScenicHome implements NowPlaying.Listener {
                 + "or you can pin one photo. Optional Wikimedia Commons 4K downloads are saved on the TV, "
                 + "with the author and licence listed for every download. Aerial videos are separate.");
         focusFirstRow();
+    }
+
+    private void chooseMusicBackdrop(String mode) {
+        prefs().edit().putString(MUSIC_BACKDROP_KEY, mode).apply();
+        // Re-evaluate the active session immediately; no launcher restart or audio interruption.
+        if (track != null) onNowPlaying(track);
+        openWallpapers();
     }
 
     private void openBrazilWallpapers() {
@@ -1951,7 +2174,9 @@ final class ScenicHome implements NowPlaying.Listener {
                 closeScreenNow();
             }));
         }
-        city.requestFocus();
+        // Open at the first unit choice; the city field remains reachable by Down.
+        // Automatically focusing EditText can open the TV IME and trap arrow keys.
+        focusFirstRow();
     }
 
     private void chooseWeatherUnit(String unit) {
@@ -1959,7 +2184,7 @@ final class ScenicHome implements NowPlaying.Listener {
         weatherView.setText("");
         refreshWeather();
         openWeather();
-        screenContent.post(() -> screenContent.getChildAt(1).requestFocus());
+        screenContent.post(() -> screenContent.getChildAt(Weather.CELSIUS.equals(unit) ? 1 : 2).requestFocus());
     }
 
     private void openMusicAccess() {
@@ -2068,7 +2293,7 @@ final class ScenicHome implements NowPlaying.Listener {
         ImageView b = new ImageView(a);
         b.setImageResource(icon);
         b.setImageTintList(a.getColorStateList(R.color.scenic_icon_tint));
-        b.setBackgroundResource(R.drawable.scenic_round_bg);
+        b.setBackground(new SceneGlassDrawable(b, -1f, 0x2AFFFFFF));
         b.setScaleType(ImageView.ScaleType.CENTER);
         b.setFocusable(true);
         b.setClickable(true);

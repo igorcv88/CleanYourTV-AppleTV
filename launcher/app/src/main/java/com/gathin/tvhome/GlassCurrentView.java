@@ -15,10 +15,10 @@ import android.view.KeyEvent;
 import android.view.View;
 
 /**
- * Glass Current: the thin lit progress ribbon above the dock. A low, gently curved stroke (3.2dp), brighter
+ * Glass Current: the thin lit progress ribbon above the dock. A level stroke (3.2dp), brighter
  * over the elapsed part, with the elapsed time at its left end and the remaining time at its right end; the
- * stroke runs between the two labels. A low-amplitude ribbon moves gently while a track plays,
- * tinted from its cover artwork; motion is decorative, not a microphone/audio FFT visualizer.
+ * stroke runs between the two labels. A separate, low-amplitude accent animates above the straight
+ * progress line, tinted from its cover artwork; motion is decorative, not audio/FFT analysis.
  *
  * Focusable only when the session supports seeking: then Left/Right seek 15 s per press and are consumed;
  * Up/Down pass through. Unfocused, it never touches D-pad keys.
@@ -33,8 +33,10 @@ final class GlassCurrentView extends View {
     private final Paint glow = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint rest = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint knob = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint accentWave = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint label = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
+    private final Path waveform = new Path();
     private final Path seg = new Path();
     private final PathMeasure measure = new PathMeasure();
     private final float[] pos = new float[2];
@@ -63,6 +65,10 @@ final class GlassCurrentView extends View {
         glow.setStrokeWidth(stroke * 3.2f);
         rest.setColor(0x47FFFFFF);
         knob.setColor(0xFFFFFFFF);
+        accentWave.setColor(0x70A9D7F4);
+        accentWave.setStyle(Paint.Style.STROKE);
+        accentWave.setStrokeWidth(Math.max(1f, 1.4f * density));
+        accentWave.setStrokeCap(Paint.Cap.ROUND);
         label.setColor(0xD9F5F6F8);
         label.setTextSize(13f * ctx.getResources().getDisplayMetrics().scaledDensity);
         Typeface inter = ctx.getResources().getFont(R.font.inter_medium);
@@ -115,6 +121,7 @@ final class GlassCurrentView extends View {
         if (accent != color) {
             accent = color;
             glow.setColor((accent & 0x00FFFFFF) | 0x46000000);
+            accentWave.setColor((accent & 0x00FFFFFF) | 0x70000000);
             lastGradientWidth = -1;
             invalidate();
         }
@@ -145,7 +152,8 @@ final class GlassCurrentView extends View {
     protected void onFocusChanged(boolean gainFocus, int direction, android.graphics.Rect previous) {
         super.onFocusChanged(gainFocus, direction, previous);
         animate().cancel();
-        animate().scaleY(gainFocus ? 1.25f : 1f).setDuration(200).start();
+        // Never scale the entire view: doing so stretched the timestamp glyphs and bent the track.
+        setScaleY(1f);
         invalidate();
     }
 
@@ -159,25 +167,16 @@ final class GlassCurrentView extends View {
         return super.onKeyDown(keyCode, event);
     }
 
-    /** Builds the curve between the labels once per width: a slow, shallow arc with a hint of a wave. */
+    /** The seek path is always horizontal. Only the separate visual accent is animated. */
     private void buildPath(int w, int h) {
         float gap = 14f * density;
         float labelW = Math.max(label.measureText("0:00:00"), 40f * density);
         pathStart = labelW + gap;
         pathEnd = w - labelW - gap;
-        // About 6dp at the crest while playing, 2dp at rest. The line itself stays 3.2dp.
-        float cy = h / 2f, amp = (playing && animateWave ? 6f : 2f) * density;
-        float phase = playing && animateWave ? (SystemClock.uptimeMillis() % 7000L) * (float) (2 * Math.PI / 7000L) : 0f;
+        float cy = h / 2f;
         path.reset();
-        int steps = 72;
-        for (int i = 0; i <= steps; i++) {
-            float t = i / (float) steps;
-            float x = pathStart + (pathEnd - pathStart) * t;
-            float envelope = (float) Math.sin(Math.PI * t);
-            float y = cy - amp * 0.65f * envelope
-                    + amp * envelope * (float) Math.sin(2 * Math.PI * (2.25f * t) - phase);
-            if (i == 0) path.moveTo(x, y); else path.lineTo(x, y);
-        }
+        path.moveTo(pathStart, cy);
+        path.lineTo(pathEnd, cy);
         measure.setPath(path, false);
         pathW = w;
         if (lastGradientWidth != w) {
@@ -193,11 +192,27 @@ final class GlassCurrentView extends View {
         }
     }
 
+    /** Cover-coloured animation; amplitude does not claim to follow Spotify's actual sound. */
+    private void drawAccent(Canvas c, int h) {
+        if (!playing || !animateWave) return;
+        float phase = (SystemClock.uptimeMillis() % 2600L) * (float) (2 * Math.PI / 2600L);
+        float centre = h / 2f - 7f * density;
+        waveform.reset();
+        for (int i = 0; i <= 48; i++) {
+            float t = i / 48f;
+            float x = pathStart + (pathEnd - pathStart) * t;
+            float envelope = (float) Math.sin(Math.PI * t);
+            float y = centre - 2.5f * density * envelope * (float) Math.sin(8f * Math.PI * t - phase);
+            if (i == 0) waveform.moveTo(x, y); else waveform.lineTo(x, y);
+        }
+        c.drawPath(waveform, accentWave);
+    }
+
     @Override
     protected void onDraw(Canvas c) {
         int w = getWidth(), h = getHeight();
         if (w <= 0 || h <= 0) return;
-        if (pathW != w || (playing && animateWave)) buildPath(w, h);
+        if (pathW != w) buildPath(w, h);
         boolean focused = isFocused();
         label.setAlpha(focused ? 255 : 210);
         float base = h / 2f - (label.descent() + label.ascent()) / 2f;
@@ -206,6 +221,8 @@ final class GlassCurrentView extends View {
         float len = measure.getLength();
         if (fraction < 0f) {
             c.drawPath(path, rest);
+            drawAccent(c, h);
+            if (playing && animateWave && isShown()) postInvalidateDelayed(83);
             return;
         }
         float at = len * fraction;
@@ -220,6 +237,7 @@ final class GlassCurrentView extends View {
             measure.getPosTan(at, pos, null);
             c.drawCircle(pos[0], pos[1], 6f * density, knob);
         }
+        drawAccent(c, h);
         // ~12 Hz while Home is visible. No playback motion in reduced-motion mode.
         if (playing && animateWave && isShown()) postInvalidateDelayed(83);
     }

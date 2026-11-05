@@ -1003,6 +1003,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         });
     }
 
+    /** On Scenic's Apps screen, Up from the first grid row returns to the dock. */
+    boolean focusedGridIsFirstRow() {
+        int position = focusedTilePosition();
+        return position >= 0 && position < COLUMNS;
+    }
+
     void launchEntry(AppAdapter.Entry e) {
         if (scenicSound != null) scenicSound.onAppOpened();
         Recents.record(this, e.pkg);
@@ -1044,6 +1050,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
     void pauseAerial() { if (scenicAerial != null) scenicAerial.pause(); }
     void resumeAerial() { if (scenicAerial != null && resumed) scenicAerial.resume(); }
+    void setAerialAudioPlaying(boolean playing) {
+        if (scenicAerial != null) scenicAerial.setExternalAudioPlaying(playing);
+    }
+    boolean aerialNeedsArtworkFallback() {
+        return scenicAerial != null && scenicAerial.needsArtworkFallback();
+    }
 
     void showSounds() {
         if (scenicSound == null) return;

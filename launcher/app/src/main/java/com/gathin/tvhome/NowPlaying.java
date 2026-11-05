@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.media.MediaMetadata;
+import android.media.MediaDescription;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
@@ -44,8 +45,8 @@ final class NowPlaying {
         int state;
         long position, updateTime, duration, actions;
         float speed;
-        /** Display artwork (<= 512 px), and a small blurred copy for the scene; both may be null. */
-        Bitmap art, blurredArt;
+        /** Cover (<=512 px), lightly blurred wallpaper, and small frosted-glass sample. */
+        Bitmap art, blurredArt, glassArt;
         /** This track's art is still being decoded: keep the current scene rather than flashing the wallpaper. */
         boolean artPending;
 
@@ -68,7 +69,7 @@ final class NowPlaying {
     private MediaController controller;
     private boolean started;
     private String lastArtKey;
-    private Bitmap lastArt, lastBlurred;
+    private Bitmap lastArt, lastBlurred, lastGlass;
     private int artGeneration;
     private boolean artLoading;
 
@@ -225,11 +226,15 @@ final class NowPlaying {
         }
         Bitmap bmp = m == null ? null : firstBitmap(m);
         List<String> artUris = m == null ? new ArrayList<>() : artUris(m);
-        t.artKey = t.pkg + '|' + t.title + '|' + t.album + '|' + (bmp != null
-                ? bmp.getGenerationId() + "x" + bmp.getWidth() : artUris.toString());
+        // Some music apps parcel a new bitmap on every PlaybackState update. GenerationId
+        // would then change every second, clearing the cover and starting another download.
+        // Identify the track by metadata stable across playback changes instead.
+        t.artKey = t.pkg + '|' + t.title + '|' + t.artist + '|' + t.album + '|'
+                + t.duration + '|' + artUris + '|' + (bmp == null ? "no-bitmap" : bmp.getWidth() + "x" + bmp.getHeight());
         if (t.artKey.equals(lastArtKey)) {
             t.art = lastArt;
             t.blurredArt = lastBlurred;
+            t.glassArt = lastGlass;
             t.artPending = lastArt == null && artLoading;
             listener.onNowPlaying(t);
             return;
@@ -238,6 +243,7 @@ final class NowPlaying {
         lastArtKey = t.artKey;
         lastArt = null;
         lastBlurred = null;
+        lastGlass = null;
         artLoading = bmp != null || !artUris.isEmpty();
         t.artPending = artLoading;
         final int gen = ++artGeneration;
@@ -253,13 +259,17 @@ final class NowPlaying {
                 if (src != null) break;
             }
             Bitmap shown = src == null ? null : scaleDown(src, 512);
-            Bitmap blur = src == null ? null : Blur.blurred(src, 48, 3);
+            // At 48px a full-screen cover was just a colour smear. Keep enough of the
+            // sleeve visible to recognise it, but retain a separately frosted glass sample.
+            Bitmap blur = src == null ? null : Blur.blurred(src, 384, 2);
+            Bitmap glass = src == null ? null : Blur.blurred(src, 64, 4);
             main.post(() -> {
                 if (gen != artGeneration || !key.equals(lastArtKey)) return;
                 // Decoded, or failed for good: either way no longer pending (a failure falls back to no art).
                 artLoading = false;
                 lastArt = shown;
                 lastBlurred = blur;
+                lastGlass = glass;
                 publish();
             });
         });
@@ -277,6 +287,10 @@ final class NowPlaying {
             Bitmap b = m.getBitmap(k);
             if (b != null && !b.isRecycled() && b.getWidth() > 0) return b;
         }
+        // Media3-based players may expose their icon only through MediaDescription.
+        MediaDescription description = m.getDescription();
+        Bitmap icon = description == null ? null : description.getIconBitmap();
+        if (icon != null && !icon.isRecycled() && icon.getWidth() > 0) return icon;
         return null;
     }
 
@@ -288,6 +302,9 @@ final class NowPlaying {
             String v = m.getString(k);
             if (v != null && !v.isEmpty() && !result.contains(v)) result.add(v);
         }
+        MediaDescription description = m.getDescription();
+        Uri icon = description == null ? null : description.getIconUri();
+        if (icon != null && !result.contains(icon.toString())) result.add(icon.toString());
         return result;
     }
 
