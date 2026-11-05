@@ -84,7 +84,6 @@ function Save-CtvDevice([string]$Path, [string]$Address, [string]$Name, [int]$Ex
     if (-not $displayName) { $displayName = "Android TV $id" }
     if ($match.Count -gt 0) {
         $match[0].address = $addressValue
-        if (-not $ExistingId) { $match[0].name = $displayName }
     } else {
         $devices += [pscustomobject]@{ id = $id; name = $displayName; address = $addressValue }
     }
