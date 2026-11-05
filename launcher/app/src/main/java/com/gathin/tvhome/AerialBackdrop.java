@@ -59,6 +59,8 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
      */
     // 10 a second: the moving frost reads as continuous, and the copies leave the TV's CPU for the music app
     // (15 a second took noticeably more and the music app's audio broke up under load).
+    // With music playing over the aerial the rate stays (a slower frost visibly lags the video); the sample
+    // gets smaller instead (Blur.MUSIC_SIDE), leaving the TV's CPU to the music app.
     private static final long GLASS_FRAME_MS = 100L;
     /** After a refused copy (the surface between frames, a seek): try again a little later. */
     private static final long GLASS_RETRY_MS = 500L;
@@ -405,7 +407,10 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
             return;
         }
         // Twice the frost's size: Blur.Stream halves it with filtering (see Blur.MOTION_SIDE).
-        float k = 2f * Blur.MOTION_SIDE / (float) Math.max(video.getWidth(), video.getHeight());
+        final boolean music = externalAudioPlaying;
+        final int side = music ? Blur.MUSIC_SIDE : Blur.MOTION_SIDE;
+        final int radius = music ? Blur.MUSIC_RADIUS : Blur.MOTION_RADIUS;
+        float k = 2f * side / (float) Math.max(video.getWidth(), video.getHeight());
         int w = Math.max(32, Math.round(video.getWidth() * k)), h = Math.max(18, Math.round(video.getHeight() * k));
         if (snapshot == null || snapshot.getWidth() != w || snapshot.getHeight() != h) {
             try {
@@ -429,7 +434,7 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
                 copyMs += android.os.SystemClock.uptimeMillis() - sampleStarted;
                 GLASS_WORKER.execute(() -> {
                     long b0 = android.os.SystemClock.uptimeMillis();
-                    Bitmap frost = glassStream.blur(target, Blur.MOTION_SIDE, Blur.MOTION_RADIUS);
+                    Bitmap frost = glassStream.blur(target, side, radius);
                     blurMs += android.os.SystemClock.uptimeMillis() - b0;
                     float lum = glassStream.luminance();
                     main.post(() -> glassSampled(frost, lum));

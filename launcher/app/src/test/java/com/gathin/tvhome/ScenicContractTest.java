@@ -187,10 +187,11 @@ public class ScenicContractTest {
         String sample = body(aerial, "private void sampleGlass()");
         assertContains("reused copy target", sample, "if (snapshot == null || snapshot.getWidth() != w");
         assertFalse("no fresh blur bitmap per sample", sample.contains("Blur.blurred("));
-        assertContains("two reused output bitmaps", sample, "glassStream.blur(target, Blur.MOTION_SIDE, Blur.MOTION_RADIUS)");
-        assertContains("copied at twice the frost's size", sample, "2f * Blur.MOTION_SIDE");
+        assertContains("two reused output bitmaps", sample, "glassStream.blur(target, side, radius)");
+        assertContains("copied at twice the frost's size", sample, "2f * side");
         String done = body(aerial, "private void glassSampled(");
-        assertContains("the next copy follows the last", done, "GLASS_FRAME_MS - took");
+        assertContains("the next copy follows the last, at the same rate under music", done, "GLASS_FRAME_MS - took");
+        assertContains("a smaller sample under music", sample, "music ? Blur.MUSIC_SIDE : Blur.MOTION_SIDE");
         assertContains("luminance measured off the UI thread", done, "Scene.setStill(frost, lum);");
     }
 
