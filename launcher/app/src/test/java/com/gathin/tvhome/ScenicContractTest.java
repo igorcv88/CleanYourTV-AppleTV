@@ -192,6 +192,10 @@ public class ScenicContractTest {
         String done = body(aerial, "private void glassSampled(");
         assertContains("the next copy follows the last, at the same rate under music", done, "GLASS_FRAME_MS - took");
         assertContains("a smaller sample under music", sample, "music ? Blur.MUSIC_SIDE : Blur.MOTION_SIDE");
+        assertContains("only when the user opts in", sample, "lightFrostWithMusic && externalAudioPlaying");
+        String audio = body(aerial, "void setExternalAudioPlaying(boolean playing)");
+        assertContains("paused reports never restart the end grace", audio, "if (externalAudioPlaying && !musicEndPending) {");
+        assertContains("opt-in, off by default", src("ScenicHome.java"), "getBoolean(MUSIC_FROST_KEY, false)");
         assertContains("luminance measured off the UI thread", done, "Scene.setStill(frost, lum);");
     }
 
