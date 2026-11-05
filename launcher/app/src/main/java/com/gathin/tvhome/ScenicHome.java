@@ -647,7 +647,7 @@ final class ScenicHome implements NowPlaying.Listener {
         LinearLayout rows = new LinearLayout(a);
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setPadding(dp(10), dp(10), dp(10), dp(10));
-        rows.setBackground(new LiquidGlassDrawable.Panel());
+        rows.setBackground(new SceneGlassDrawable(rows, 22f, 0x45131C2B));
         PopupWindow p = new PopupWindow(rows, dp(240), ViewGroup.LayoutParams.WRAP_CONTENT, true);
         menu = p;
         p.setOnDismissListener(() -> { if (menu == p) menu = null; });

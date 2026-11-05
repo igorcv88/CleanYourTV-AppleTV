@@ -4,6 +4,7 @@ import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
+import android.os.Build;
 import android.os.StatFs;
 import android.util.Log;
 
@@ -129,11 +130,21 @@ final class AerialVideoOnly {
             muxer.start();
             started = true;
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-            ByteBuffer buffer = ByteBuffer.allocateDirect(1 << 20);
+            // API 26/27 cannot ask the extractor for the next sample size. Reserve a bounded
+            // buffer from the declared maximum (or 16 MiB), rather than requiring SDK 28.
+            int initialSize = 1 << 20;
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                initialSize = 16 << 20;
+                if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE))
+                    initialSize = Math.max(1 << 20, format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE));
+            }
+            if (initialSize > MAX_SAMPLE_BYTES) throw new IOException("Video sample buffer is too large");
+            ByteBuffer buffer = ByteBuffer.allocateDirect(initialSize);
             int samples = 0;
             while (true) {
                 if (musicIsPlaying.getAsBoolean()) throw new CancellationException();
-                long sampleSize = extractor.getSampleSize();
+                long sampleSize = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                        ? extractor.getSampleSize() : buffer.capacity();
                 if (sampleSize < 0) break;
                 if (sampleSize > MAX_SAMPLE_BYTES) throw new IOException("Video sample is too large");
                 if (sampleSize > buffer.capacity()) buffer = ByteBuffer.allocateDirect((int) sampleSize);

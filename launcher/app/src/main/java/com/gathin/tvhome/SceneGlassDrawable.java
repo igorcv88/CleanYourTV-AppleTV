@@ -75,15 +75,17 @@ final class SceneGlassDrawable extends Drawable {
         rect.set(getBounds());
         float r = radius < 0 ? Math.min(rect.width(), rect.height()) / 2f : radius;
         Bitmap bmp = Scene.current();
-        View rootView = host.getRootView();
-        if (bmp != null && !bmp.isRecycled() && rootView.getWidth() > 0 && rootView.getHeight() > 0) {
+        // Absolute screen alignment also works for PopupWindow panels, whose root view is not fullscreen.
+        int screenW = host.getResources().getDisplayMetrics().widthPixels;
+        int screenH = host.getResources().getDisplayMetrics().heightPixels;
+        if (bmp != null && !bmp.isRecycled() && screenW > 0 && screenH > 0) {
             if (bmp != shaderBitmap) {
                 scene.setShader(new BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
                 refractedRim.setShader(new BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
                 shaderBitmap = bmp;
             }
-            float[] cover = SceneCrop.cover(bmp.getWidth(), bmp.getHeight(), rootView.getWidth(), rootView.getHeight());
-            host.getLocationInWindow(loc);
+            float[] cover = SceneCrop.cover(bmp.getWidth(), bmp.getHeight(), screenW, screenH);
+            host.getLocationOnScreen(loc);
             matrix.setScale(cover[0], cover[0]);
             matrix.postTranslate(cover[1] - loc[0], cover[2] - loc[1]);
             // The host may be scaled (focus); undo it so the image stays still behind the glass.
