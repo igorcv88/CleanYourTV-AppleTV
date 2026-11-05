@@ -46,10 +46,11 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
     private volatile boolean externalAudioPlaying;
     /** Spotify can briefly report no active session at a track boundary; do not revive audio then. */
     private static final long AUDIO_END_GRACE_MS = 3500L;
-    private int prepareGeneration;
+    /** Read by the background remux cancellation callback, mutated only on the main thread. */
+    private volatile int prepareGeneration;
     private SurfaceView video;
     private SurfaceHolder surface;
-    private boolean resumed;
+    private volatile boolean resumed;
     private boolean dimmed;
     /** One downsampled frame every 16 seconds, never live GPU blur or a UI-thread pixel loop. */
     private static final long GLASS_SAMPLE_MS = 16_000L;
@@ -262,9 +263,17 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
 
     void pause() {
         resumed = false;
+        cancelPreparation();
         release();
         cover.animate().cancel();
         cover.setAlpha(1f);
+    }
+
+    /** Stop disk activity as soon as Home goes away; restart only after a new resume/surface. */
+    private void cancelPreparation() {
+        if (!preparing) return;
+        prepareGeneration++;
+        preparing = false;
     }
 
     private void start() {
@@ -285,7 +294,8 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
             File cacheRoot = context.getExternalCacheDir();
             final File cache = cacheRoot == null ? null : new File(cacheRoot, "aerial-video-only");
             VIDEO_WORKER.execute(() -> {
-                AerialVideoOnly.Result result = AerialVideoOnly.prepare(source, cache, () -> externalAudioPlaying);
+                AerialVideoOnly.Result result = AerialVideoOnly.prepare(source, cache,
+                        () -> externalAudioPlaying || !resumed || generation != prepareGeneration);
                 main.post(() -> {
                     if (generation != prepareGeneration || !file.equals(source)) return;
                     preparing = false;
@@ -360,6 +370,7 @@ final class AerialBackdrop implements SurfaceHolder.Callback {
 
     @Override public void surfaceDestroyed(SurfaceHolder holder) {
         surface = null;
+        cancelPreparation();
         release();
     }
 

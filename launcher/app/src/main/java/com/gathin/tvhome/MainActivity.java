@@ -1003,6 +1003,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         });
     }
 
+    /** On Scenic's Apps screen, Up from the first grid row returns to the dock. */
+    boolean focusedGridIsFirstRow() {
+        int position = focusedTilePosition();
+        return position >= 0 && position < COLUMNS;
+    }
+
     void launchEntry(AppAdapter.Entry e) {
         if (scenicSound != null) scenicSound.onAppOpened();
         Recents.record(this, e.pkg);

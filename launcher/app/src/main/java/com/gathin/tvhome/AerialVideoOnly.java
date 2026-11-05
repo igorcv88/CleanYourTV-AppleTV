@@ -35,9 +35,10 @@ final class AerialVideoOnly {
 
     private AerialVideoOnly() { }
 
-    static Result prepare(File source, File cacheDir, BooleanSupplier musicIsPlaying) {
+    static Result prepare(File source, File cacheDir, BooleanSupplier cancelled) {
         MediaExtractor extractor = new MediaExtractor();
         try {
+            if (cancelled.getAsBoolean()) return new Result(source, false);
             extractor.setDataSource(source.getAbsolutePath());
             int video = -1;
             boolean audio = false;
@@ -68,7 +69,7 @@ final class AerialVideoOnly {
             File output = new File(cacheDir, "silent_" + key + (webm ? ".webm" : ".mp4"));
             if (output.isFile() && output.length() > 0 && hasNoAudio(output)) return new Result(output, true);
             // Never perform large disk I/O during Spotify's live/automixed audio playback.
-            if (musicIsPlaying.getAsBoolean()) return new Result(source, false);
+            if (cancelled.getAsBoolean()) return new Result(source, false);
             long free = new StatFs(cacheDir.getPath()).getAvailableBytes();
             // A copy is the maximum source size; leave space for Android and streaming apps.
             if (!ScenicAudioPolicy.hasRoomForVideoCopy(free, source.length())) {
@@ -77,13 +78,17 @@ final class AerialVideoOnly {
             }
             File partial = new File(cacheDir, output.getName() + ".part");
             try {
-                copyVideoTrack(extractor, video, format, partial, musicIsPlaying,
+                copyVideoTrack(extractor, video, format, partial, cancelled,
                         webm ? MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM : MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-                if (partial.length() <= 0 || !hasNoAudio(partial) || !partial.renameTo(output))
+                if (cancelled.getAsBoolean()) throw new CancellationException();
+                if (partial.length() <= 0 || !hasNoAudio(partial))
+                    throw new IOException("Cannot verify silent aerial");
+                if (cancelled.getAsBoolean()) throw new CancellationException();
+                if (!partial.renameTo(output))
                     throw new IOException("Cannot verify/commit silent aerial");
                 return new Result(output, true);
             } catch (CancellationException e) {
-                Log.i(TAG, "Deferring video-only preparation until music stops");
+                Log.i(TAG, "Video-only preparation cancelled; retry after playback/Home resumes");
                 return new Result(source, false);
             } catch (Exception e) {
                 Log.w(TAG, "Cannot strip audio from aerial; source kept unchanged", e);
@@ -120,7 +125,7 @@ final class AerialVideoOnly {
     }
 
     private static void copyVideoTrack(MediaExtractor extractor, int sourceTrack, MediaFormat format,
-                                       File out, BooleanSupplier musicIsPlaying, int container) throws IOException {
+                                       File out, BooleanSupplier cancelled, int container) throws IOException {
         MediaMuxer muxer = null;
         boolean started = false;
         try {
@@ -142,7 +147,7 @@ final class AerialVideoOnly {
             ByteBuffer buffer = ByteBuffer.allocateDirect(initialSize);
             int samples = 0;
             while (true) {
-                if (musicIsPlaying.getAsBoolean()) throw new CancellationException();
+                if (cancelled.getAsBoolean()) throw new CancellationException();
                 long sampleSize = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
                         ? extractor.getSampleSize() : buffer.capacity();
                 if (sampleSize < 0) break;
