@@ -30,6 +30,12 @@ final class Blur {
      */
     static final int MOTION_SIDE = 240, MOTION_RADIUS = 6;
 
+    /**
+     * The aerial's frost while music plays over it: a smaller sample (about 2.3x cheaper to blur, and a smaller
+     * copy), blurred wider (~66 px) so its lower resolution never shows. Same rate: only quality is traded.
+     */
+    static final int MUSIC_SIDE = 160, MUSIC_RADIUS = 5;
+
     /** The scene sample every glass surface draws: see {@link #GLASS_SIDE}. */
     static Bitmap glass(Bitmap src) {
         return blurred(src, GLASS_SIDE, GLASS_RADIUS);
