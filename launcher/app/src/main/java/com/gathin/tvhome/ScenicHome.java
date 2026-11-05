@@ -49,7 +49,6 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.File;
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -114,7 +113,6 @@ final class ScenicHome implements NowPlaying.Listener {
     private final SceneGlassDrawable appsFrost;
     private final GradientDrawable appsShade;
     private ImageView still;
-    private final ScenicWallpaperPlayer wallpaperGallery;
 
     private FrameLayout listenLayer;
     private ImageView bigArt;
@@ -187,8 +185,6 @@ final class ScenicHome implements NowPlaying.Listener {
         wash.setVisibility(View.GONE);
         wash.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         root.addView(wash, Math.max(0, Math.min(washIndex, root.getChildCount())), full());
-        wallpaperGallery = ScenicWallpaperPlayer.selected(a)
-                ? new ScenicWallpaperPlayer(a, root, root.indexOfChild(wash)) : null;
         // Under All Apps: over a moving aerial, a full-screen veil of the same frosted glass, so the names
         // read over the flight; over the album wash (already blurred) only a gentle shade.
         dim = new View(activity);
@@ -380,7 +376,6 @@ final class ScenicHome implements NowPlaying.Listener {
 
     void resume() {
         resumed = true;
-        if (wallpaperGallery != null) wallpaperGallery.start();
         nowPlaying.start();
         refreshWeather();
         startTick();
@@ -388,7 +383,6 @@ final class ScenicHome implements NowPlaying.Listener {
 
     void pause() {
         resumed = false;
-        if (wallpaperGallery != null) wallpaperGallery.pause();
         nowPlaying.stop();
         handler.removeCallbacks(tick);
         if (menu != null) menu.dismiss();
@@ -398,7 +392,6 @@ final class ScenicHome implements NowPlaying.Listener {
     void release() {
         released = true;
         nowPlaying.release();
-        if (wallpaperGallery != null) wallpaperGallery.close();
         worker.shutdownNow();
         Scene.reset();
     }
@@ -2087,7 +2080,10 @@ final class ScenicHome implements NowPlaying.Listener {
             p.edit().putString(WALLPAPER_KEY, "still").apply();
             a.recreate();
         }));
-        if (aerials) screenContent.addView(row("Download more aerials", null, () -> { closeScreenNow(); a.showAerialDownloads(); }));
+        screenContent.addView(row("Download Apple aerials", null, () -> { closeScreenNow(); a.showAerialDownloads(); }));
+        screenContent.addView(row("Manage downloaded aerial videos", null,
+                () -> { closeScreenNow(); a.showDownloadedAerials(); }));
+        screenContent.addView(row("Brazil · drone videos", null, this::openBrazilVideos));
         heading("Background while music plays");
         String musicBackdrop = p.getString(MUSIC_BACKDROP_KEY, "aerial");
         screenContent.addView(choiceRow("Keep the aerial video", "Default",
@@ -2098,32 +2094,6 @@ final class ScenicHome implements NowPlaying.Listener {
                 + "If the TV cannot isolate the video, album artwork replaces it automatically during music "
                 + "to protect Spotify's mixing effects. You can also choose artwork all the time to reduce "
                 + "video decoding. Pausing music returns to the selected wallpaper.");
-        heading("Scenic photo collections");
-        String selectedGroup = p.getString(ScenicWallpaperPlayer.GROUP, "all");
-        screenContent.addView(choiceRow("All collections · Shuffle", "HD & downloaded 4K",
-                "gallery".equals(choice) && "all".equals(selectedGroup), () -> selectWallpaperGroup("all", "")));
-        for (ScenicWallpaperCatalog.Group group : ScenicWallpaperCatalog.GROUPS) {
-            int count = ScenicWallpaperPlayer.items(a, group.id).size();
-            screenContent.addView(row(group.label, count + " available" +
-                    ("gallery".equals(choice) && group.id.equals(selectedGroup) ? " · ✓" : ""),
-                    () -> openWallpaperGroup(group)));
-        }
-        screenContent.addView(row("Brazil · cities & landscapes", "7 regions", this::openBrazilWallpapers));
-        int minutes = p.getInt(ScenicWallpaperPlayer.MINUTES, 10);
-        screenContent.addView(row("Photo rotation", minutes + " min", () -> {
-            int next = ScenicWallpaperPlayer.ROTATION_MINUTES[0];
-            for (int i = 0; i < ScenicWallpaperPlayer.ROTATION_MINUTES.length; i++) {
-                if (minutes == ScenicWallpaperPlayer.ROTATION_MINUTES[i]) {
-                    next = ScenicWallpaperPlayer.ROTATION_MINUTES[(i + 1) % ScenicWallpaperPlayer.ROTATION_MINUTES.length];
-                    break;
-                }
-            }
-            p.edit().putInt(ScenicWallpaperPlayer.MINUTES, next).apply();
-            openWallpapers();
-        }));
-        note("Photos are included with the original CleanYourTV themes and work offline. Each group can rotate, "
-                + "or you can pin one photo. Optional Wikimedia Commons 4K downloads are saved on the TV, "
-                + "with the author and licence listed for every download. Aerial videos are separate.");
         focusFirstRow();
     }
 
@@ -2132,20 +2102,6 @@ final class ScenicHome implements NowPlaying.Listener {
         // Re-evaluate the active session immediately; no launcher restart or audio interruption.
         if (track != null) onNowPlaying(track);
         openWallpapers();
-    }
-
-    private void openBrazilWallpapers() {
-        openScreen("Brazil · aerial landscapes", this::openBrazilWallpapers);
-        note("Select a city or state, then find 4K aerial photos on Wikimedia Commons. Downloads are optional "
-                + "and rotate as a group. The collection grows as you add photos; images are never downloaded "
-                + "automatically on mobile data or at startup.");
-        screenContent.addView(row("Brazil · moving aerial videos", "Download on demand", this::openBrazilVideos));
-        heading("Brazil · 4K photo collections");
-        for (ScenicWallpaperCatalog.Group group : ScenicWallpaperCatalog.BRAZIL) {
-            int count = ScenicWallpaperPlayer.items(a, group.id).size();
-            screenContent.addView(row(group.label, count + " downloaded", () -> openWallpaperGroup(group)));
-        }
-        focusFirstRow();
     }
 
     private void openBrazilVideos() {
@@ -2165,9 +2121,9 @@ final class ScenicHome implements NowPlaying.Listener {
         screenContent.addView(row("Explore videos from Minas Gerais", null, () -> openBrazilVideoSources("minas")));
         screenContent.addView(row("Video credits & licences", null, this::openBrazilVideoCredits));
         note("The Wikimedia Commons drone video collection currently has limited cities. Salvador has a 4K "
-                + "clip, but footage from every Brazilian capital is not available. For Fortaleza, Rio and other "
-                + "regions, the 4K aerial photo collections above offer a larger selection. WebM playback also "
-                + "depends on the TV's video decoder.");
+                + "clip, but footage from every Brazilian capital is not available. "
+                + "WebM playback depends on the TV's video decoder. Remove downloaded clips under Wallpapers "
+                + "→ Manage downloaded aerial videos.");
         heading("Downloaded on this TV");
         for (String[] video : installed) {
             if (!video[0].startsWith("br_")) continue;
@@ -2266,136 +2222,6 @@ final class ScenicHome implements NowPlaying.Listener {
         });
     }
 
-    private void selectWallpaperGroup(String group, String fixed) {
-        prefs().edit().putString(WALLPAPER_KEY, ScenicWallpaperPlayer.MODE)
-                .putString(ScenicWallpaperPlayer.GROUP, group)
-                .putString(ScenicWallpaperPlayer.FIXED, fixed)
-                .remove(ScenicWallpaperPlayer.CHANGED).apply();
-        a.recreate();
-    }
-
-    private void openWallpaperGroup(ScenicWallpaperCatalog.Group group) {
-        openScreen(group.label, () -> openWallpaperGroup(group));
-        List<ScenicWallpaperCatalog.Item> photos = ScenicWallpaperPlayer.items(a, group.id);
-        screenContent.addView(row("Use collection · Shuffle", photos.isEmpty() ? "Download photos first" : photos.size() + " photos", () -> {
-            if (photos.isEmpty()) {
-                Toast.makeText(a, "Download at least one photo first", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            selectWallpaperGroup(group.id, "");
-        }));
-        screenContent.addView(row("Explore & download 4K", "Wikimedia Commons", () -> openCommonsGroup(group)));
-        screenContent.addView(row("Photo credits & licences", null, () -> openPhotoCredits(group)));
-        heading("Photos · choose to pin");
-        for (ScenicWallpaperCatalog.Item photo : photos) {
-            View item = wallpaperRow(photo, () -> selectWallpaperGroup(group.id, photo.id));
-            screenContent.addView(item);
-        }
-        if (photos.isEmpty()) note("No photos are bundled in this group. Explore Wikimedia Commons and download a "
-                + "4K photo to enable it. Photos are downloaded only when you select them.");
-        note("Downloaded photos are stored in this launcher's files, not in the APK. Their names, credits and "
-                + "licences are kept with them, and the file can be removed from the TV's storage settings.");
-        focusFirstRow();
-    }
-
-    private void openPhotoCredits(ScenicWallpaperCatalog.Group group) {
-        openScreen("Credits · " + group.label, () -> openPhotoCredits(group));
-        int n = 0;
-        for (ScenicWallpaperCatalog.Item photo : ScenicWallpaperPlayer.items(a, group.id)) {
-            if (photo.file == null) continue;
-            heading(photo.name);
-            note(photo.credit + "\n" + photo.source);
-            n++;
-        }
-        if (n == 0) note("This group currently uses the photos included with the original CleanYourTV themes. "
-                + "No Wikimedia Commons photos have been downloaded yet.");
-        screenContent.addView(row("Back to " + group.label, null, () -> openWallpaperGroup(group)));
-        focusFirstRow();
-    }
-
-    private void openCommonsGroup(ScenicWallpaperCatalog.Group group) {
-        openScreen("4K · " + group.label, () -> openCommonsGroup(group));
-        note("Searching Wikimedia Commons for landscape photos at least 3840 × 2160. Files are optional downloads; "
-                + "authors and licences remain available in this gallery. This may take a few seconds.");
-        int generation = screenToken;
-        worker.execute(() -> {
-            List<CommonsWallpapers.Photo> found = null;
-            String error = null;
-            try { found = CommonsWallpapers.search(group); }
-            catch (Exception e) { error = e.getMessage(); }
-            final List<CommonsWallpapers.Photo> results = found;
-            final String failure = error;
-            handler.post(() -> {
-                if (released || generation != screenToken) return;
-                screenContent.removeAllViews();
-                if (failure != null) {
-                    note("The 4K gallery is unavailable: " + failure + ". Built-in photos still work offline.");
-                } else if (results == null || results.isEmpty()) {
-                    note("No licensed landscape 4K photos matched this group. Try another group or try again later.");
-                } else {
-                    heading("4K photos · download on OK");
-                    for (CommonsWallpapers.Photo photo : results) {
-                        View item = row(photo.name, photo.width + "×" + photo.height, () -> downloadCommonsPhoto(group, photo));
-                        screenContent.addView(item);
-                        item.setContentDescription(photo.name + ", " + photo.credit);
-                    }
-                    note("Photo credits and their original Wikimedia Commons pages are saved with each download. "
-                            + "No automatic download happens while browsing.");
-                }
-                screenContent.addView(row("Back to " + group.label, null, () -> openWallpaperGroup(group)));
-                focusFirstRow();
-            });
-        });
-    }
-
-    private void downloadCommonsPhoto(ScenicWallpaperCatalog.Group group, CommonsWallpapers.Photo photo) {
-        openScreen("Downloading 4K photo", null);
-        note(photo.name + "\n" + photo.credit + "\n" + photo.source);
-        note("Downloading and saving to this TV. Please wait…");
-        int generation = screenToken;
-        worker.execute(() -> {
-            String error = null;
-            try { CommonsWallpapers.save(a, group, photo); }
-            catch (Exception e) { error = e.getMessage(); }
-            String failure = error;
-            handler.post(() -> {
-                if (released || generation != screenToken) return;
-                if (failure == null) openWallpaperGroup(group);
-                else {
-                    note("Could not download: " + failure);
-                    screenContent.addView(row("Retry", null, () -> downloadCommonsPhoto(group, photo)));
-                    focusFirstRow();
-                }
-            });
-        });
-    }
-
-    private View wallpaperRow(ScenicWallpaperCatalog.Item photo, Runnable action) {
-        View r = row(photo.name, photo.asset == null ? "4K" : "HD", action);
-        ImageView thumb = new ImageView(a);
-        thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(90), dp(49));
-        lp.setMarginEnd(dp(16));
-        ((LinearLayout) r).addView(thumb, 0, lp);
-        r.getLayoutParams().height = dp(64);
-        int generation = screenToken;
-        worker.execute(() -> {
-            try {
-                BitmapFactory.Options o = new BitmapFactory.Options();
-                o.inSampleSize = 16;
-                Bitmap image;
-                if (photo.asset != null) {
-                    try (InputStream in = a.getAssets().open(photo.asset)) { image = BitmapFactory.decodeStream(in, null, o); }
-                } else image = BitmapFactory.decodeFile(photo.file, o);
-                handler.post(() -> {
-                    if (!released && generation == screenToken) thumb.setImageBitmap(image);
-                });
-            } catch (Exception | OutOfMemoryError ignored) { }
-        });
-        if (photo.asset == null) r.setContentDescription(photo.name + ". " + photo.credit + ". " + photo.source);
-        return r;
-    }
-
     private void openAppearance() {
         openScreen(a.getString(R.string.scenic_appearance), this::openAppearance);
         SharedPreferences choices = a.getSharedPreferences(Config.SETTINGS_NAME, Context.MODE_PRIVATE);
@@ -2414,6 +2240,10 @@ final class ScenicHome implements NowPlaying.Listener {
             a.recreate();
         }));
         screenContent.addView(row("All Apps button in Dock", showAllAppsDock() ? "On" : "Off", () -> {
+            if (showAllAppsDock() && dockAdapter.favouriteCount() == 0) {
+                Toast.makeText(a, R.string.scenic_hide_allapps_requires_favourite, Toast.LENGTH_LONG).show();
+                return;
+            }
             prefs().edit().putBoolean(SHOW_ALL_APPS_DOCK_KEY, !showAllAppsDock()).apply();
             dockAdapter.notifyDataSetChanged();
             openAppearance();

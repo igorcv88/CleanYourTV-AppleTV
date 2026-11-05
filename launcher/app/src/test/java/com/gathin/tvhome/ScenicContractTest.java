@@ -274,6 +274,40 @@ public class ScenicContractTest {
         assertContains("left from previous selects the platter", cc, "mediaPlatter.requestFocus();");
     }
 
+    @Test public void scenicMediaCardOpensTheOwningMusicApp() {
+        String home = src("ScenicHome.java");
+        assertContains("CC media action", home, "public void listen() { quickAction(ScenicHome.this::openCurrentMediaApp); }");
+        String open = body(home, "private void openCurrentMediaApp()");
+        assertContains("current session package", open, "track.pkg");
+        assertContains("TV activity first", open, "getLeanbackLaunchIntentForPackage");
+        assertContains("regular activity fallback", open, "getLaunchIntentForPackage");
+    }
+
+    @Test public void downloadedAerialsCanBeDeletedButPhotoCollectionsCannotReappear() {
+        String activity = src("MainActivity.java");
+        String manager = body(activity, "void showDownloadedAerials()");
+        assertContains("local files available without Apple catalog", manager, "AerialBackdrop.catalog(this)");
+        assertContains("user confirms file deletion", manager, "R.string.aerials_confirm_remove");
+        assertContains("deletion goes through constrained storage helper", manager, "AerialDownloads.removeFile(this, selected[0])");
+        assertContains("selected deleted video is reset", manager, "AerialBackdrop.choose(this, AerialBackdrop.CYCLE)");
+        String deletion = body(src("AerialDownloads.java"), "static boolean removeFile(");
+        assertContains("no path traversal", deletion, "fileName.matches(");
+        assertContains("active downloads retained", deletion, "fileName.equals(downloading)");
+        assertContains("actual stored video removed", deletion, "video.delete()");
+        assertContains("silent remux cache cleared", deletion, "aerial-video-only");
+        assertContains("JSON index updated", deletion, "writeIndex(d, keep)");
+        String home = src("ScenicHome.java");
+        assertContains("delete option in Wallpapers", home, "a.showDownloadedAerials();");
+        assertFalse("generic Scenic photo collections removed", home.contains("Scenic photo collections"));
+        assertFalse("photo gallery player removed", home.contains("ScenicWallpaperPlayer"));
+        assertFalse("photo gallery network feature removed", home.contains("CommonsWallpapers"));
+        File dir = new File("src/main/java/com/gathin/tvhome");
+        if (!dir.isDirectory()) dir = new File("launcher/app/src/main/java/com/gathin/tvhome");
+        for (String removed : new String[]{"CommonsWallpapers.java", "ScenicWallpaperCatalog.java", "ScenicWallpaperPlayer.java"}) {
+            assertFalse(removed + " should no longer ship", new File(dir, removed).exists());
+        }
+    }
+
     @Test public void scenicDockCapacityAndReplacementRemainDistinctFromAppGrid() {
         String scenic = src("ScenicHome.java");
         String adapter = src("AppAdapter.java");

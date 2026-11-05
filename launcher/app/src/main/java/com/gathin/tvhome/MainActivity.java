@@ -506,8 +506,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // black under it is a second full-screen fill on every frame for nothing. The starting window still uses
         // the theme's background, so launch looks the same.
         getWindow().setBackgroundDrawable(null);
-        wallpaperPlayer = new WallpaperPlayer(this, root, cfg,
-                cfg.scenicHome && ScenicWallpaperPlayer.selected(this));
+        // An older Scenic photo-gallery selection is retired; return to aerials without erasing photo files.
+        if (cfg.scenicHome) {
+            SharedPreferences scenicPrefs = getSharedPreferences(ScenicHome.PREFS, MODE_PRIVATE);
+            if ("gallery".equals(scenicPrefs.getString(ScenicHome.WALLPAPER_KEY, "auto"))) {
+                scenicPrefs.edit().putString(ScenicHome.WALLPAPER_KEY, "auto")
+                        .remove("wallpaper_group").remove("wallpaper_fixed")
+                        .remove("wallpaper_minutes").remove("wallpaper_changed").apply();
+            }
+        }
+        wallpaperPlayer = new WallpaperPlayer(this, root, cfg, false);
         if (cfg.scenicHome) {
             String scenicBackground = getSharedPreferences(ScenicHome.PREFS, MODE_PRIVATE)
                     .getString(ScenicHome.WALLPAPER_KEY, "auto");
@@ -987,10 +995,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             glass.setVisibility(View.GONE);
             hero.setVisibility(View.GONE);
             if (racePanel != null) racePanel.setVisibility(View.GONE);
-            boolean useStill = scenicAerial == null && cfg.wallpapers.isEmpty()
-                    && !ScenicWallpaperPlayer.selected(this);
+            boolean useStill = scenicAerial == null && cfg.wallpapers.isEmpty();
             scenic = new ScenicHome(this, root, cfg, useStill, root.indexOfChild(ambient));
-            if (scenicAerial == null && !cfg.wallpapers.isEmpty() && !ScenicWallpaperPlayer.selected(this))
+            if (scenicAerial == null && !cfg.wallpapers.isEmpty())
                 scenic.useWallpaperScene(cfg.wallpapers.get(0));
             scenic.onAppsChanged(adapter.entries());
             grid.post(scenic::focusHome);
@@ -1118,13 +1125,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (isFinishing() || isDestroyed()) return;
             if (available == null) {
                 Toast.makeText(this, R.string.aerials_offline, Toast.LENGTH_LONG).show();
+                showDownloadedAerials();
                 return;
             }
-            String[] names = new String[available.size()];
-            for (int i = 0; i < names.length; i++) names[i] = available.get(i).title;
+            String[] names = new String[available.size() + 1];
+            names[0] = getString(R.string.aerials_manage_downloaded);
+            for (int i = 0; i < available.size(); i++) names[i + 1] = available.get(i).title
+                    + (AerialDownloads.onTv(this, available.get(i)) ? " ✓" : "");
             new android.app.AlertDialog.Builder(this).setTitle(R.string.aerials_download)
                     .setItems(names, (dialog, which) -> {
-                        AerialDownloads.Aerial selection = available.get(which);
+                        if (which == 0) { showDownloadedAerials(); return; }
+                        AerialDownloads.Aerial selection = available.get(which - 1);
                         if (AerialDownloads.onTv(this, selection)) {
                             AerialBackdrop.choose(this, selection.file);
                             recreate();
@@ -1139,6 +1150,45 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                         }
                     }).setNegativeButton(android.R.string.cancel, null).show();
         });
+    }
+
+    /** Works offline and lists the actual TV files, including aerials installed before Apple's catalog support. */
+    void showDownloadedAerials() {
+        List<String[]> installed = AerialBackdrop.catalog(this);
+        if (installed.isEmpty()) {
+            new android.app.AlertDialog.Builder(this).setTitle(R.string.aerials_manage_downloaded)
+                    .setMessage(R.string.aerials_none_downloaded)
+                    .setPositiveButton(android.R.string.ok, null).show();
+            return;
+        }
+        File folder = AerialDownloads.dir(this);
+        String[] names = new String[installed.size()];
+        for (int i = 0; i < installed.size(); i++) {
+            String[] entry = installed.get(i);
+            File f = new File(folder, entry[0]);
+            names[i] = entry[1] + " · " + ((f.length() + 1048575L) / 1048576L) + " MiB";
+        }
+        new android.app.AlertDialog.Builder(this).setTitle(R.string.aerials_manage_downloaded)
+                .setItems(names, (dialog, which) -> {
+                    String[] selected = installed.get(which);
+                    new android.app.AlertDialog.Builder(this)
+                            .setTitle(R.string.aerials_confirm_remove_title)
+                            .setMessage(getString(R.string.aerials_confirm_remove, names[which]))
+                            .setPositiveButton(R.string.aerials_delete, (confirm, choice) -> {
+                                if (!AerialDownloads.removeFile(this, selected[0])) {
+                                    Toast.makeText(this, R.string.aerials_remove_failed, Toast.LENGTH_LONG).show();
+                                    return;
+                                }
+                                Toast.makeText(this, getString(R.string.aerials_removed, selected[1]), Toast.LENGTH_LONG).show();
+                                if (selected[0].equals(AerialBackdrop.chosen(this, ""))) {
+                                    AerialBackdrop.choose(this, AerialBackdrop.CYCLE);
+                                }
+                                // Recreate so the video decoder no longer holds a deleted file open.
+                                recreate();
+                            })
+                            .setNegativeButton(android.R.string.cancel, (cancel, unused) -> showDownloadedAerials())
+                            .show();
+                }).setNegativeButton(android.R.string.cancel, null).show();
     }
 
     /**
