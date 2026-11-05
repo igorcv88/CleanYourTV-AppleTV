@@ -14,6 +14,15 @@ foreach ($script in @('devices.ps1', 'interactive.ps1', 'setup.ps1')) {
     Assert-Ctv ($errors.Count -eq 0) "PowerShell syntax: $script ($errors)"
 }
 
+# The Setup ZIP ships multiple Windows consumers of tools/venv, including optional add-ons.
+# A persistent-only interpreter would make disable/restore/theme fail after a first install.
+$setupSource = Get-Content (Join-Path $PSScriptRoot '..\setup.ps1') -Raw
+Assert-Ctv ($setupSource.Contains('$venvDir = ''tools\venv''')) 'Setup provisions the ZIP-local Python environment'
+foreach ($consumer in @('tools\disable.ps1', 'tools\restore.ps1', 'tools\theme.ps1')) {
+    $source = Get-Content (Join-Path $PSScriptRoot "..\..\$consumer") -Raw
+    Assert-Ctv ($source.Contains('venv\Scripts\python.exe')) "existing Python consumer is still supported: $consumer"
+}
+
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('cleanyourtv-test-' + [guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $temporary
 try {

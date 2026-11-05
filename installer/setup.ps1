@@ -8,13 +8,12 @@ if (-not (Test-Path $apk)) { throw 'Extract the full Setup ZIP before running.' 
 $env:TV_HOST = $TvHost
 Push-Location $root
 try {
-    # Keep the Python environment and ADB identity between newly extracted release ZIPs.
+    # All Windows tools and optional add-ons expect tools/venv in the extracted ZIP.
+    # Recreate it automatically for each ZIP; only the ADB identity lives outside it.
+    $venvDir = 'tools\venv'
     if ($env:LOCALAPPDATA) {
         $stateDir = Join-Path $env:LOCALAPPDATA 'CleanYourTV'
-        $venvDir = Join-Path $stateDir 'venv'
         $env:CLEANYOURTV_ADB_KEYDIR = Join-Path $stateDir 'adbkey'
-    } else {
-        $venvDir = 'tools\venv'
     }
     $py = Join-Path $venvDir 'Scripts\python.exe'
     if (-not (Test-Path $py)) {

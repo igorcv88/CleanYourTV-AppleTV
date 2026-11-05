@@ -25,8 +25,9 @@ The ZIP now includes a small native Windows `.exe` entrypoint; its PowerShell an
 ## Installation (read first)
 
 1. Extract the full ZIP on the computer. Use a computer connected to the same network as the TV.
-2. Enable ADB debugging on the TV and approve its debugging prompt. Windows requires Python 3.10+ on the first run;
-   the installer's Python virtual environment and ADB keys are then reused between releases.
+2. Enable ADB debugging on the TV and approve its debugging prompt. Windows requires Python 3.10+;
+   the installer automatically prepares `tools\venv` in each extracted ZIP, so all included scripts and
+   optional add-ons can use the same interpreter. The ADB key is reused between releases.
 3. **Windows:** double-click `CleanYourTV-Setup.exe` in the extracted ZIP. On first run, enter the TV's IP address.
    Later runs offer the saved TV by default, or allow adding a second TV or changing an IP.
    Advanced manual use is still supported: `./installer/setup.ps1 -TvHost <TV_IP>` in PowerShell.
@@ -40,8 +41,10 @@ The ZIP now includes a small native Windows `.exe` entrypoint; its PowerShell an
 
 - `%LOCALAPPDATA%\CleanYourTV\devices.json` stores TV names, addresses and the default choice. It is saved only
   after a successful installation. The next Setup ZIP reads the same file; do not copy it into a public issue.
-- `%LOCALAPPDATA%\CleanYourTV\venv` caches Python dependencies, and `%LOCALAPPDATA%\CleanYourTV\adbkey`
-  stores the ADB private/public key pair (a sensitive credential). Keep this directory private.
+- `tools\venv` belongs to each extracted Setup ZIP. It is created automatically and is intentionally not
+  stored in `%LOCALAPPDATA%`: other Windows scripts and add-ons rely on this relative location.
+- `%LOCALAPPDATA%\CleanYourTV\adbkey` stores the persistent ADB private/public key pair (a sensitive
+  credential). Keep this directory private.
 - `%LOCALAPPDATA%\CleanYourTV\recovery` keeps dated copies of the original Home and disabled-package list.
 - When moving from an old ZIP that stored its key under `tools/adbkey`, you may need to approve ADB once more;
   subsequent installations reuse the new persistent key.

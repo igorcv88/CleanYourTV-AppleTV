@@ -81,8 +81,8 @@ try {
 
     $name = $selection.name
     if (-not $name) {
-        $pythonPath = Join-Path $env:LOCALAPPDATA 'CleanYourTV\venv\Scripts\python.exe'
         $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+        $pythonPath = Join-Path $root 'tools\venv\Scripts\python.exe'
         try {
             $model = @(& $pythonPath -I (Join-Path $root 'tools\tv.py') 'getprop ro.product.model')
             if ($LASTEXITCODE -eq 0 -and $model.Count -gt 0) { $name = "$($model[-1])".Trim() }

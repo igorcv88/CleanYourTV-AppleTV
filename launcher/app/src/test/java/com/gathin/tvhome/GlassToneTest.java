@@ -32,6 +32,9 @@ public class GlassToneTest {
         assertTrue("still " + still, still >= 40f && still <= 70f);
         assertTrue("motion " + motion, motion >= 40f && motion <= 70f);
         assertTrue("still and moving glass match", Math.abs(still - motion) < 0.25f * still);
+        float music = Blur.screenSigma(Blur.MUSIC_SIDE, Blur.MUSIC_RADIUS, 3, 1920);
+        assertTrue("music " + music, music > motion && music <= 90f);
+        assertTrue("music sample's pixels stay inside its blur", 1920f / Blur.MUSIC_SIDE < music / 2f);
         // Each sample pixel stretched over the screen stays well inside the blur, so no block ever shows.
         assertTrue(1920f / Blur.MOTION_SIDE < still / 2f);
     }
@@ -51,14 +54,19 @@ public class GlassToneTest {
         assertTrue(GlassTone.LENS_MAGNIFY > 1f && GlassTone.LENS_MAGNIFY < 1.2f);
     }
 
-    @Test public void brightScenesGetASmokedVeilDarkScenesAFaintLift() {
+    @Test public void brightScenesGetASmokedVeilClearGlassNoWhiteLift() {
         for (GlassTone.Kind k : new GlassTone.Kind[]{GlassTone.Kind.CHROME, GlassTone.Kind.PANEL, GlassTone.Kind.CONTROL,
                 GlassTone.Kind.BACKDROP}) {
             int overBright = GlassTone.tint(k, 0.9f, false, false);
             int overDark = GlassTone.tint(k, 0.1f, false, false);
             assertTrue(k + ": more material over a bright scene", alpha(overBright) > alpha(overDark));
             assertTrue(k + ": the bright-scene veil is dark, for white text", lum(overBright) < 0.25f);
-            assertTrue(k + ": the dark-scene tint is lighter than the bright-scene one", lum(overDark) > lum(overBright));
+            // Only text panels keep a faint white lift over dark scenes; clear glass carries none (it read as frost).
+            if (k == GlassTone.Kind.PANEL) {
+                assertTrue(k + ": the dark-scene tint is lighter than the bright-scene one", lum(overDark) > lum(overBright));
+            } else {
+                assertTrue(k + ": no white lift on clear glass", alpha(overDark) <= 0x02 || lum(overDark) < 0.25f);
+            }
         }
     }
 
