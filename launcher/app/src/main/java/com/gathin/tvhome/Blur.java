@@ -24,11 +24,11 @@ final class Blur {
     static final int GLASS_SIDE = 320, GLASS_RADIUS = 8;
 
     /**
-     * The aerial's moving frost, sampled many times a second: 240 px with radius 6, about 52 screen pixels,
+     * The aerial's moving frost, sampled many times a second: 240 px with radius 5, about 44 screen pixels,
      * matching the still frost. It is copied from the video at twice this size and halved with filtering:
      * a copy straight at this size point-samples the video, which showed as sharp, pixelated detail.
      */
-    static final int MOTION_SIDE = 240, MOTION_RADIUS = 6;
+    static final int MOTION_SIDE = 240, MOTION_RADIUS = 5;
 
     /**
      * The aerial's frost while music plays over it: a smaller sample (about 2.3x cheaper to blur, and a smaller
