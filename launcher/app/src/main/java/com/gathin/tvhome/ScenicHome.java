@@ -2083,6 +2083,8 @@ final class ScenicHome implements NowPlaying.Listener {
         screenContent.addView(row("Download Apple aerials", null, () -> { closeScreenNow(); a.showAerialDownloads(); }));
         screenContent.addView(row("Manage downloaded aerial videos", null,
                 () -> { closeScreenNow(); a.showDownloadedAerials(); }));
+        if (a.legacyScenicPhotoBytes() > 0) screenContent.addView(row(
+                a.getString(R.string.scenic_legacy_photos_cleanup), null, a::offerLegacyScenicPhotoCleanup));
         screenContent.addView(row("Brazil · drone videos", null, this::openBrazilVideos));
         heading("Background while music plays");
         String musicBackdrop = p.getString(MUSIC_BACKDROP_KEY, "aerial");

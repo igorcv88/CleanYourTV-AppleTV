@@ -298,6 +298,8 @@ public class ScenicContractTest {
         assertContains("JSON index updated", deletion, "writeIndex(d, keep)");
         String home = src("ScenicHome.java");
         assertContains("delete option in Wallpapers", home, "a.showDownloadedAerials();");
+        assertContains("legacy photos can be removed only on user request", home, "a.legacyScenicPhotoBytes() > 0");
+        assertContains("legacy photos cleanup has its own confirmation", activity, "R.string.scenic_legacy_photos_confirm");
         assertFalse("generic Scenic photo collections removed", home.contains("Scenic photo collections"));
         assertFalse("photo gallery player removed", home.contains("ScenicWallpaperPlayer"));
         assertFalse("photo gallery network feature removed", home.contains("CommonsWallpapers"));

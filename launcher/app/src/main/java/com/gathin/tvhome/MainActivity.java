@@ -1191,6 +1191,39 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 }).setNegativeButton(android.R.string.cancel, null).show();
     }
 
+    /** Only the files written by the now-retired 4K photo collections, never the user's theme wallpapers. */
+    private File[] legacyScenicPhotoFiles() {
+        File folder = getExternalFilesDir("scenic_wallpapers");
+        if (folder == null) folder = new File(getFilesDir(), "scenic_wallpapers");
+        File[] files = folder.listFiles((d, name) ->
+                name.matches("[a-z_]+_[0-9]+\\.jpg") || name.matches("[a-z_]+\\.json"));
+        return files == null ? new File[0] : files;
+    }
+
+    long legacyScenicPhotoBytes() {
+        long bytes = 0;
+        for (File f : legacyScenicPhotoFiles()) bytes += f.length();
+        return bytes;
+    }
+
+    void offerLegacyScenicPhotoCleanup() {
+        File[] files = legacyScenicPhotoFiles();
+        if (files.length == 0) return;
+        long bytes = 0;
+        for (File f : files) bytes += f.length();
+        long mib = (bytes + 1048575L) / 1048576L;
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.scenic_legacy_photos_cleanup)
+                .setMessage(getString(R.string.scenic_legacy_photos_confirm, mib))
+                .setPositiveButton(R.string.scenic_legacy_photos_cleanup, (dialog, which) -> {
+                    boolean allRemoved = true;
+                    for (File f : files) if (!f.delete()) allRemoved = false;
+                    if (!allRemoved) Toast.makeText(this, R.string.scenic_legacy_photos_failed, Toast.LENGTH_LONG).show();
+                    recreate();
+                })
+                .setNegativeButton(android.R.string.cancel, null).show();
+    }
+
     /**
      * handle_view_inputs: switch InputsRequestActivity, the VIEW_INPUTS handler, on or off. It is disabled in the
      * manifest, so a TV with its own input picker never sees it; only the sets that need it turn it on. Written

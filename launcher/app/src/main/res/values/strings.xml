@@ -181,6 +181,9 @@
     <string name="scenic_backup_saved">Backup exported successfully</string>
     <string name="scenic_backup_restored">Settings restored</string>
     <string name="scenic_backup_failed">Could not read or write the backup</string>
+    <string name="scenic_legacy_photos_cleanup">Remove old Scenic photo downloads</string>
+    <string name="scenic_legacy_photos_confirm">Remove the retired photo collection downloads (%1$d MiB)? This cannot be undone, but the built-in theme wallpapers are unaffected.</string>
+    <string name="scenic_legacy_photos_failed">Some old photo downloads could not be deleted</string>
     <string name="scenic_listen">Listen</string>
     <string name="scenic_settings">Settings</string>
     <string name="scenic_tv_settings">TV &amp; Chromecast settings</string>

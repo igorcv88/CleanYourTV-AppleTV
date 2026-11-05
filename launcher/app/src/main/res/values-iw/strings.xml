@@ -172,6 +172,9 @@
     <string name="scenic_backup_saved">הגיבוי יוצא בהצלחה</string>
     <string name="scenic_backup_restored">ההגדרות שוחזרו</string>
     <string name="scenic_backup_failed">לא ניתן לקרוא או לכתוב את הגיבוי</string>
+    <string name="scenic_legacy_photos_cleanup">מחיקת הורדות תמונה ישנות של Scenic</string>
+    <string name="scenic_legacy_photos_confirm">למחוק הורדות של אוספי התמונות שהוסרו (%1$d MiB)? לא ניתן לבטל זאת, אך טפטי ערכות הנושא המובנים לא יושפעו.</string>
+    <string name="scenic_legacy_photos_failed">לא ניתן למחוק חלק מהורדות התמונות הישנות</string>
     <string name="scenic_listen">האזנה</string>
     <string name="scenic_settings">הגדרות</string>
     <string name="scenic_tv_settings">הגדרות הטלוויזיה ו-Chromecast</string>
