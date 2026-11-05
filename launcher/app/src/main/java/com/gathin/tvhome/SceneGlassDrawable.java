@@ -42,10 +42,13 @@ import androidx.annotation.NonNull;
 final class SceneGlassDrawable extends Drawable {
     private static boolean frosted;
 
-    /** The body's frost at rest and focused: focus lifts the glass itself, brighter and richer, not a veil. */
-    private static final ColorFilter BODY = filter(1.18f, 1f), BODY_FOCUSED = filter(1.32f, 1.16f);
-    /** The lens band catches more light than the body, and more again when focused. */
-    private static final ColorFilter LENS = filter(1.12f, 1.08f), LENS_FOCUSED = filter(1.3f, 1.24f);
+    /**
+     * One clear glass, body and lens band alike: the same light and colour, so the rim differs from the middle
+     * only by its refraction (a frosted-looking middle inside a clear rim read as two materials). Focus lifts
+     * the glass itself, brighter and richer, never a veil.
+     */
+    private static final ColorFilter BODY = filter(1.12f, 1.08f), BODY_FOCUSED = filter(1.3f, 1.24f);
+    private static final ColorFilter LENS = BODY, LENS_FOCUSED = BODY_FOCUSED;
 
     private static ColorFilter filter(float saturation, float brightness) {
         ColorMatrix m = new ColorMatrix();
@@ -139,9 +142,11 @@ final class SceneGlassDrawable extends Drawable {
         edge.setShader(new LinearGradient(b.left, b.top, b.left, b.bottom,
                 new int[]{0xD9FFFFFF, 0x40FFFFFF, 0x1AFFFFFF, 0x59FFFFFF},
                 new float[]{0f, 0.32f, 0.75f, 1f}, Shader.TileMode.CLAMP));
-        float sheenEnd = b.top + Math.min(b.height() * 0.5f, 110f * density);
+        // A thin gloss under the top rim, not a white wash over the upper half (that read as frost, doubly so
+        // on glass over glass such as the dock's All Apps card).
+        float sheenEnd = b.top + Math.min(b.height() * 0.22f, 40f * density);
         sheen.setShader(new LinearGradient(b.left, b.top, b.left, sheenEnd,
-                0x24FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+                0x1CFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
         float shortDp = Math.min(b.width(), b.height()) / density;
         lens.setStrokeWidth(GlassTone.lensBandDp(shortDp) * density);
     }

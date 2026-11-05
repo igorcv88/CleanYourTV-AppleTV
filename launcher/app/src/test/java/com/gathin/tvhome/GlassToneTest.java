@@ -54,14 +54,19 @@ public class GlassToneTest {
         assertTrue(GlassTone.LENS_MAGNIFY > 1f && GlassTone.LENS_MAGNIFY < 1.2f);
     }
 
-    @Test public void brightScenesGetASmokedVeilDarkScenesAFaintLift() {
+    @Test public void brightScenesGetASmokedVeilClearGlassNoWhiteLift() {
         for (GlassTone.Kind k : new GlassTone.Kind[]{GlassTone.Kind.CHROME, GlassTone.Kind.PANEL, GlassTone.Kind.CONTROL,
                 GlassTone.Kind.BACKDROP}) {
             int overBright = GlassTone.tint(k, 0.9f, false, false);
             int overDark = GlassTone.tint(k, 0.1f, false, false);
             assertTrue(k + ": more material over a bright scene", alpha(overBright) > alpha(overDark));
             assertTrue(k + ": the bright-scene veil is dark, for white text", lum(overBright) < 0.25f);
-            assertTrue(k + ": the dark-scene tint is lighter than the bright-scene one", lum(overDark) > lum(overBright));
+            // Only text panels keep a faint white lift over dark scenes; clear glass carries none (it read as frost).
+            if (k == GlassTone.Kind.PANEL) {
+                assertTrue(k + ": the dark-scene tint is lighter than the bright-scene one", lum(overDark) > lum(overBright));
+            } else {
+                assertTrue(k + ": no white lift on clear glass", alpha(overDark) <= 0x02 || lum(overDark) < 0.25f);
+            }
         }
     }
 
