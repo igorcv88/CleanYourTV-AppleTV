@@ -3766,6 +3766,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     private PopupWindow glassPopup(View panel, int width) {
+        // Scenic Glass: the menus share its one glass material instead of the classic opaque panel.
+        if (scenic != null) SceneGlassDrawable.apply(panel, 22f, GlassTone.Kind.PANEL);
         final PopupWindow popup = new PopupWindow(panel, width, ViewGroup.LayoutParams.WRAP_CONTENT, true);
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));   // needed for Back to dismiss
         popup.setOutsideTouchable(true);

@@ -18,6 +18,7 @@ final class Scene {
     private Scene() { }
 
     private static Bitmap still, music;
+    private static float stillLum = GlassTone.UNKNOWN, musicLum = GlassTone.UNKNOWN;
     private static final List<WeakReference<View>> hosts = new ArrayList<>();
 
     /** The current blurred scene, or null. */
@@ -25,7 +26,13 @@ final class Scene {
         return music != null ? music : still;
     }
 
+    /** Mean luminance of {@link #current()}, 0..1, or {@link GlassTone#UNKNOWN}: drives the adaptive tint. */
+    static float luminance() {
+        return music != null ? musicLum : still != null ? stillLum : GlassTone.UNKNOWN;
+    }
+
     static void setStill(Bitmap blurred) {
+        if (still != blurred) stillLum = measure(blurred);
         still = blurred;
         invalidateAll();
     }
@@ -33,7 +40,22 @@ final class Scene {
     static void setMusic(Bitmap blurred) {
         if (music == blurred) return;
         music = blurred;
+        musicLum = measure(blurred);
         invalidateAll();
+    }
+
+    /** Once per scene change, on a bitmap of a few thousand pixels: never per frame. */
+    private static float measure(Bitmap b) {
+        if (b == null || b.isRecycled() || b.getConfig() == Bitmap.Config.HARDWARE) return GlassTone.UNKNOWN;
+        try {
+            int w = b.getWidth(), h = b.getHeight();
+            if (w <= 0 || h <= 0 || (long) w * h > 65536L) return GlassTone.UNKNOWN;
+            int[] px = new int[w * h];
+            b.getPixels(px, 0, w, 0, 0, w, h);
+            return GlassTone.meanLuminance(px);
+        } catch (RuntimeException e) {
+            return GlassTone.UNKNOWN;
+        }
     }
 
     static void register(View v) {
@@ -50,6 +72,8 @@ final class Scene {
     static void reset() {
         still = null;
         music = null;
+        stillLum = GlassTone.UNKNOWN;
+        musicLum = GlassTone.UNKNOWN;
         hosts.clear();
     }
 }

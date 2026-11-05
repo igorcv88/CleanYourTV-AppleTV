@@ -126,9 +126,7 @@ final class ScenicHome implements NowPlaying.Listener {
     private LinearLayout screenContent;
     private ScrollView screenScroll;
     private TextView screenTitle;
-    private FrameLayout quickPanel;
-    private LinearLayout quickRows;
-    private TextView quickMedia;
+    private ControlCenter controlCenter;
     private boolean appsShown;
 
     private final NowPlaying nowPlaying;
@@ -139,6 +137,12 @@ final class ScenicHome implements NowPlaying.Listener {
     private final java.util.concurrent.ExecutorService worker = Executors.newSingleThreadExecutor();
     private boolean released;
     private int screenToken;
+    /** The inner levels of Settings; see {@link ScreenStack}. */
+    private final ScreenStack<Runnable> screens = new ScreenStack<>();
+    private boolean screenFromPanel, navigatingBack;
+    private int panelFocusIndex = -1;
+    /** {scrollY, focusIndex} to restore on the screen being built, or null for a fresh one. */
+    private int[] pendingRestore;
 
     private List<String> favourites;
     private final Map<String, AppAdapter.Entry> byPkg = new HashMap<>();
@@ -157,6 +161,8 @@ final class ScenicHome implements NowPlaying.Listener {
         display = activity.getResources().getFont(R.font.inter_display_medium);
         displayLight = activity.getResources().getFont(R.font.inter_display_light);
         Scene.reset();
+        SceneGlassDrawable.setFrosted("frosted".equals(activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(GLASS_KEY, "clear")));
         weather = new Weather(activity);
         nowPlaying = new NowPlaying(activity, this);
 
@@ -217,7 +223,7 @@ final class ScenicHome implements NowPlaying.Listener {
         LinearLayout.LayoutParams quickLp = new LinearLayout.LayoutParams(dp(48), dp(48));
         quickLp.setMarginStart(dp(18));
         right.addView(quick, quickLp);
-        quick.setOnClickListener(v -> openQuickPanel());
+        quick.setOnClickListener(v -> toggleControlCenter());
         ImageView gear = roundButton(R.drawable.ic_settings, 48, a.getString(R.string.scenic_settings));
         settingsButton = gear;
         LinearLayout.LayoutParams gearLp = new LinearLayout.LayoutParams(dp(48), dp(48));
@@ -236,9 +242,8 @@ final class ScenicHome implements NowPlaying.Listener {
                 tileH + 2 * pad, Gravity.BOTTOM);
         dockLp.setMargins(dp(48), 0, dp(48), dp(36));
         layer.addView(dockFrame, dockLp);
-        dockFrame.setBackground(new SceneGlassDrawable(dockFrame, 28f, glassTint()));
-        dockFrame.setElevation(dp(10));
-        dockFrame.setOutlineProvider(rounded(28));
+        SceneGlassDrawable.apply(dockFrame, 30f, GlassTone.Kind.CHROME);
+        dockFrame.setElevation(dp(8));
         dockFrame.setClipToOutline(true);
         dock = new RecyclerView(activity);
         dock.setLayoutManager(new LinearLayoutManager(activity, RecyclerView.HORIZONTAL, false) {
@@ -330,7 +335,7 @@ final class ScenicHome implements NowPlaying.Listener {
         btnListen.setTextColor(a.getColorStateList(R.color.scenic_row_text));
         btnListen.setGravity(Gravity.CENTER);
         btnListen.setPadding(dp(22), 0, dp(22), 0);
-        btnListen.setBackground(new SceneGlassDrawable(btnListen, -1f, 0x30131C2B));
+        SceneGlassDrawable.apply(btnListen, -1f, GlassTone.Kind.CONTROL);
         btnListen.setFocusable(true);
         btnListen.setClickable(true);
         LinearLayout.LayoutParams listenLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44));
@@ -341,7 +346,7 @@ final class ScenicHome implements NowPlaying.Listener {
 
         buildPanel();
         buildScreen();
-        buildQuickPanel();
+        buildControlCenter();
         // The original Apps RecyclerView belongs to a weighted LinearLayout. Its classic
         // header is gone in Scenic, so reserve a real layout inset (not a translation)
         // before the first row: scrolling and D-pad focus must never slide under the clock.
@@ -473,7 +478,7 @@ final class ScenicHome implements NowPlaying.Listener {
     void showApps(boolean show, boolean focusGrid) {
         if (appsShown == show) return;
         appsShown = show;
-        if (show && quickPanel != null && quickPanel.getVisibility() == View.VISIBLE) closeQuickPanelNow();
+        if (show && controlCenter != null && controlCenter.isOpen()) closeControlCenterNow();
         // Apps is a separate navigation level. The clock/gear are only on Home, where Up
         // returns to them; they must not steal focus from the top row of All Apps.
         header.setVisibility(show ? View.GONE : View.VISIBLE);
@@ -570,8 +575,9 @@ final class ScenicHome implements NowPlaying.Listener {
                 h.icon.setVisibility(View.VISIBLE);
                 h.label.setText(R.string.scenic_all_apps);
                 h.label.setVisibility(View.VISIBLE);
+                // Inside the dock's glass: a lift of the same material, not a second sampled sheet.
                 if (!(h.card.getBackground() instanceof SceneGlassDrawable))
-                    h.card.setBackground(new SceneGlassDrawable(h.card, 16f, 0x33FFFFFF));
+                    h.card.setBackground(new SceneGlassDrawable(h.card, 16f, GlassTone.Kind.INSET));
             } else {
                 AppAdapter.Entry e = items.get(pos);
                 if (h.card.getTag(R.id.tile_bg_orig) == null) h.card.setTag(R.id.tile_bg_orig, a.getDrawable(R.drawable.tile_bg));
@@ -666,7 +672,7 @@ final class ScenicHome implements NowPlaying.Listener {
         LinearLayout rows = new LinearLayout(a);
         rows.setOrientation(LinearLayout.VERTICAL);
         rows.setPadding(dp(10), dp(10), dp(10), dp(10));
-        rows.setBackground(new SceneGlassDrawable(rows, 22f, 0x45131C2B));
+        SceneGlassDrawable.apply(rows, 22f, GlassTone.Kind.PANEL);
         PopupWindow p = new PopupWindow(rows, dp(240), ViewGroup.LayoutParams.WRAP_CONTENT, true);
         menu = p;
         p.setOnDismissListener(() -> { if (menu == p) menu = null; });
@@ -735,19 +741,24 @@ final class ScenicHome implements NowPlaying.Listener {
         int code = ev.getKeyCode();
         View f = a.getCurrentFocus();
         if (listening) return listenKey(f, code);
-        if (quickPanel != null && quickPanel.getVisibility() == View.VISIBLE) {
+        if (controlCenter != null && controlCenter.isOpen()) {
             if (!isDpad(code)) return false;
-            View next = f == null ? null : f.focusSearch(direction(code));
-            return next == null || !isInside(next, quickPanel);
+            if (f == null || !controlCenter.contains(f)) {   // focus was lost mid-animation: bring it back
+                controlCenter.focusFirst();
+                return true;
+            }
+            View next = f.focusSearch(direction(code));
+            return next == null || !controlCenter.contains(next);
         }
-        if (panel.getVisibility() == View.VISIBLE || screen.getVisibility() == View.VISIBLE) {
-            // Keep focus inside the open overlay.
+        boolean screenOpen = screen.getVisibility() == View.VISIBLE && screens.depth() > 0;
+        if (panel.getVisibility() == View.VISIBLE || screenOpen) {
+            // Keep focus inside the open overlay (not a screen that is only fading out after Back).
             if (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT
                     || code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN) {
                 if (panel.getVisibility() == View.VISIBLE
                         && (code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_DPAD_UP)
                         && movePanelFocus(f, code == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1)) return true;
-                if (screen.getVisibility() == View.VISIBLE
+                if (screenOpen
                         && (code == KeyEvent.KEYCODE_DPAD_DOWN || code == KeyEvent.KEYCODE_DPAD_UP)
                         && moveScreenFocus(f, code == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : -1)) return true;
                 // A text field moves its own caret with Left/Right.
@@ -889,10 +900,11 @@ final class ScenicHome implements NowPlaying.Listener {
     /** Back: the top overlay closes and gives focus back. False when Home has nothing open. */
     boolean onBack() {
         if (menu != null) { menu.dismiss(); return true; }
-        if (quickPanel != null && quickPanel.getVisibility() == View.VISIBLE) { closeQuickPanel(); return true; }
+        if (controlCenter != null && controlCenter.isOpen()) { closeControlCenter(); return true; }
         if (movingPkg != null) { endMove(); return true; }
         if (listening) { closeListen(); return true; }
-        if (screen.getVisibility() == View.VISIBLE) { closeScreen(); return true; }
+        // depth > 0: a screen still fading out after its last Back is not a level to go back from again.
+        if (screen.getVisibility() == View.VISIBLE && screens.depth() > 0) { backScreen(); return true; }
         if (panel.getVisibility() == View.VISIBLE) { closePanel(); return true; }
         if (appsShown) {
             showApps(false, false);
@@ -904,13 +916,17 @@ final class ScenicHome implements NowPlaying.Listener {
 
     private void closeAllOverlays() {
         if (menu != null) menu.dismiss();
-        if (quickPanel != null) quickPanel.setVisibility(View.GONE);
+        if (controlCenter != null) controlCenter.close(false);
         endMove();
         if (listening) {
             if (listenAnim != null) listenAnim.cancel();
             finishListenClose();
         }
+        screenToken++;   // late gallery/network callbacks must not fill the hidden screen
         screen.setVisibility(View.GONE);
+        screens.clear();
+        screenFromPanel = false;
+        pendingRestore = null;
         panel.setVisibility(View.GONE);
         focusMemory.clear();
     }
@@ -925,9 +941,7 @@ final class ScenicHome implements NowPlaying.Listener {
                 || t.state == MediaTime.STATE_BUFFERING));
         NowPlaying.Track old = track;
         track = t;
-        if (quickMedia != null) {
-            quickMedia.setText(t == null ? "No music playing" : t.title + "\n" + (t.artist == null ? "" : t.artist));
-        }
+        syncControlCenterMedia();
         if (t == null) {
             ribbon.setPlaying(false);
             ribbon.setArtwork(null);
@@ -1002,7 +1016,7 @@ final class ScenicHome implements NowPlaying.Listener {
             view.setImageResource(R.drawable.ic_music);
             view.setScaleType(ImageView.ScaleType.CENTER);
             if (!(view.getBackground() instanceof SceneGlassDrawable))
-                view.setBackground(new SceneGlassDrawable(view, radiusDp, 0x33FFFFFF));
+                view.setBackground(new SceneGlassDrawable(view, radiusDp, GlassTone.Kind.CONTROL));
         }
     }
 
@@ -1132,7 +1146,7 @@ final class ScenicHome implements NowPlaying.Listener {
         openApp.setTextColor(a.getColorStateList(R.color.scenic_row_text));
         openApp.setGravity(Gravity.CENTER);
         openApp.setPadding(dp(22), 0, dp(22), 0);
-        openApp.setBackground(new SceneGlassDrawable(openApp, -1f, 0x2AFFFFFF));
+        SceneGlassDrawable.apply(openApp, -1f, GlassTone.Kind.CONTROL);
         openApp.setFocusable(true);
         openApp.setClickable(true);
         LinearLayout.LayoutParams oa = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44));
@@ -1285,8 +1299,7 @@ final class ScenicHome implements NowPlaying.Listener {
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(400), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END);
         lp.setMargins(0, dp(24), dp(24), dp(24));
         layer.addView(panel, lp);
-        panel.setBackground(new SceneGlassDrawable(panel, 28f, 0x45131C2B));
-        panel.setOutlineProvider(rounded(28));
+        SceneGlassDrawable.apply(panel, 28f, GlassTone.Kind.PANEL);
         panel.setClipToOutline(true);
         panel.setElevation(dp(24));
         LinearLayout shell = new LinearLayout(a);
@@ -1388,117 +1401,104 @@ final class ScenicHome implements NowPlaying.Listener {
 
     // ---- Control Center: actual TV shortcuts, never simulated Wi-Fi/audio toggles -----------------
 
-    private void buildQuickPanel() {
-        quickPanel = new FrameLayout(a);
-        quickPanel.setVisibility(View.GONE);
-        quickPanel.setBackgroundColor(0x18000000);
-        quickPanel.setElevation(dp(40));
-        layer.addView(quickPanel, full());
-
-        LinearLayout card = new LinearLayout(a);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(18), dp(20), dp(18), dp(18));
-        card.setBackground(new SceneGlassDrawable(card, 28f, 0x45131C2B));
-        card.setOutlineProvider(rounded(28));
-        card.setClipToOutline(true);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(430),
-                ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
-        lp.setMargins(0, dp(88), dp(42), 0);
-        quickPanel.addView(card, lp);
-
-        TextView title = text(24, display, TEXT);
-        title.setText("Control Center");
-        title.setPadding(dp(12), 0, 0, dp(16));
-        card.addView(title);
-
-        quickRows = new LinearLayout(a);
-        quickRows.setOrientation(LinearLayout.VERTICAL);
-        card.addView(quickRows);
-
-        addQuickPair("Network", "Wi-Fi settings", () -> a.openNetworkSettings(),
-                "Audio", "TV sound settings", () -> a.openIntent(new Intent(Settings.ACTION_SOUND_SETTINGS)));
-        addQuickPair("Inputs", "TV sources", () -> a.showInputsMenu(),
-                "Wallpaper", "Scenery & collections", this::openWallpapers);
-        addQuickPair("Weather", "City & units", this::openWeather,
-                "Settings", "TV & Chromecast", () -> a.openTvSettings());
-
-        quickMedia = text(15, medium, TEXT);
-        quickMedia.setSingleLine(false);
-        quickMedia.setMaxLines(2);
-        quickMedia.setGravity(Gravity.CENTER_VERTICAL);
-        quickMedia.setPadding(dp(18), dp(8), dp(18), dp(8));
-        quickMedia.setText("No music playing");
-        quickMedia.setBackground(new SceneGlassDrawable(quickMedia, 18f, 0x30131C2B));
-        quickMedia.setFocusable(true);
-        quickMedia.setClickable(true);
-        LinearLayout.LayoutParams mediaLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(62));
-        mediaLp.topMargin = dp(10);
-        quickRows.addView(quickMedia, mediaLp);
-        quickMedia.setOnClickListener(v -> quickAction(() -> {
-            if (track != null) openListen(); else openMusicAccess();
-        }));
-        focusMotion(quickMedia);
+    private void buildControlCenter() {
+        controlCenter = new ControlCenter(a, layer, regular, medium, reducedMotion, new ControlCenter.Actions() {
+            @Override public void network() { quickAction(a::openNetworkSettings); }
+            @Override public void sound() { quickAction(() -> a.openIntent(new Intent(Settings.ACTION_SOUND_SETTINGS))); }
+            @Override public boolean hasInputs() { return a.hasInputs(); }
+            @Override public void inputs() { quickAction(a::showInputsMenu); }
+            @Override public void scenery() { quickAction(ScenicHome.this::openWallpapers); }
+            @Override public void weather() { quickAction(ScenicHome.this::openWeather); }
+            @Override public void sleep() {
+                quickAction(() -> {
+                    if (!SleepService.sleep()) Toast.makeText(a, R.string.sleep_unavailable, Toast.LENGTH_LONG).show();
+                });
+            }
+            @Override public void tvSettings() { quickAction(a::openTvSettings); }
+            @Override public void listen() { quickAction(ScenicHome.this::openListen); }
+            @Override public void musicAccess() { quickAction(ScenicHome.this::openMusicAccess); }
+            // Transport keeps the sheet open: the same session commands as the Home buttons.
+            @Override public void previous() { nowPlaying.previous(); }
+            @Override public void togglePlay() { nowPlaying.togglePlay(); }
+            @Override public void next() { nowPlaying.next(); }
+        });
     }
 
-    private void addQuickPair(String leftTitle, String leftStatus, Runnable leftAction,
-                              String rightTitle, String rightStatus, Runnable rightAction) {
-        LinearLayout pair = new LinearLayout(a);
-        LinearLayout.LayoutParams pairLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(72));
-        pairLp.bottomMargin = dp(10);
-        quickRows.addView(pair, pairLp);
-        quickTile(pair, leftTitle, leftStatus, leftAction, false);
-        quickTile(pair, rightTitle, rightStatus, rightAction, true);
+    /** Only while the sheet is open; opening it syncs first. */
+    private void syncControlCenterMedia() {
+        if (controlCenter == null || !controlCenter.isOpen()) return;
+        NowPlaying.Track t = track;
+        if (t == null) {
+            controlCenter.setTrack(null, null, null, false, false, false, false);
+            return;
+        }
+        boolean playing = MediaTime.advancing(t.state) || t.state == MediaTime.STATE_BUFFERING;
+        controlCenter.setTrack(t.title, t.artist, t.art, playing,
+                MediaTime.can(t.actions, MediaTime.ACTION_SKIP_TO_PREVIOUS),
+                MediaTime.canToggle(t.actions, t.state),
+                MediaTime.can(t.actions, MediaTime.ACTION_SKIP_TO_NEXT));
     }
 
-    private void quickTile(LinearLayout pair, String title, String status, Runnable action, boolean second) {
-        TextView tile = text(17, medium, TEXT);
-        tile.setText(title + "\n" + status);
-        tile.setSingleLine(false);
-        tile.setMaxLines(2);
-        tile.setLineSpacing(dp(4), 1f);
-        tile.setGravity(Gravity.CENTER_VERTICAL);
-        tile.setPadding(dp(16), 0, dp(8), 0);
-        tile.setBackground(new SceneGlassDrawable(tile, 18f, 0x30131C2B));
-        tile.setFocusable(true);
-        tile.setClickable(true);
-        tile.setOnClickListener(v -> quickAction(action));
-        focusMotion(tile);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
-        if (second) lp.setMarginStart(dp(10));
-        pair.addView(tile, lp);
-    }
-
-    private void openQuickPanel() {
-        if (quickPanel.getVisibility() == View.VISIBLE) { closeQuickPanel(); return; }
+    private void toggleControlCenter() {
+        if (controlCenter.isOpen()) { closeControlCenter(); return; }
         focusMemory.push("quick", a.getCurrentFocus());
-        quickPanel.setVisibility(View.VISIBLE);
-        quickPanel.setAlpha(0f);
-        quickPanel.setTranslationY(-dp(16));
-        quickPanel.animate().alpha(1f).translationY(0f).setDuration(reducedMotion ? 120 : PANEL_MS)
-                .setInterpolator(EASE).start();
-        if (track != null) quickMedia.setText(track.title + "\n" + (track.artist == null ? "" : track.artist));
+        controlCenter.setNetwork(networkSummary());
+        controlCenter.setFooter(controlCenterFooter());
+        controlCenter.open();
+        syncControlCenterMedia();
         a.playOpenSound();
-        quickRows.getChildAt(0).post(() -> focusFirst(quickRows));
     }
 
-    private void closeQuickPanel() {
-        quickPanel.animate().cancel();
-        quickPanel.animate().alpha(0f).translationY(-dp(16)).setDuration(reducedMotion ? 100 : 220)
-                .withEndAction(() -> quickPanel.setVisibility(View.GONE)).start();
+    private void closeControlCenter() {
+        controlCenter.close(true);
         restoreFocus("quick");
     }
 
-    private void closeQuickPanelNow() {
-        quickPanel.animate().cancel();
-        quickPanel.setVisibility(View.GONE);
+    private void closeControlCenterNow() {
+        controlCenter.close(false);
         restoreFocus("quick");
     }
 
     private void quickAction(Runnable action) {
-        closeQuickPanelNow();
+        closeControlCenterNow();
         action.run();
+    }
+
+    /** Date and, when set up, the weather line: the sheet's quiet information row. */
+    private String controlCenterFooter() {
+        java.util.Locale locale = a.getResources().getConfiguration().getLocales().get(0);
+        String pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "EEEdMMM");
+        String date = new java.text.SimpleDateFormat(pattern, locale).format(new java.util.Date());
+        CharSequence w = weatherView.getVisibility() == View.VISIBLE ? weatherView.getText() : "";
+        return w.length() == 0 ? date : date + "  ·  " + w;
+    }
+
+    /** The same reading as the classic Home's network pill: state, and the network name when Android shares it. */
+    @SuppressWarnings("deprecation")
+    private NetworkSummary networkSummary() {
+        boolean online = false, validated = false, ethernet = false, wifi = false;
+        String ssid = null;
+        try {
+            android.net.ConnectivityManager cm = a.getSystemService(android.net.ConnectivityManager.class);
+            for (android.net.Network net : cm != null ? cm.getAllNetworks() : new android.net.Network[0]) {
+                android.net.NetworkCapabilities caps = cm.getNetworkCapabilities(net);
+                if (caps == null || caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)) continue;
+                if (!caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue;
+                online = true;
+                if (caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)) validated = true;
+                if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)) ethernet = true;
+                if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)) wifi = true;
+            }
+            if (wifi && !ethernet) {
+                android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager)
+                        a.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                android.net.wifi.WifiInfo info = wm != null ? wm.getConnectionInfo() : null;
+                ssid = info != null ? info.getSSID() : null;
+            }
+        } catch (RuntimeException ignored) {
+            // A TV without the service, or a SecurityException: the capsule falls back to "Network settings".
+        }
+        return NetworkSummary.of(online, validated, ethernet, wifi, ssid);
     }
 
     private void restoreFocus(String layerName) {
@@ -1525,8 +1525,7 @@ final class ScenicHome implements NowPlaying.Listener {
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(760), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER_HORIZONTAL);
         lp.setMargins(0, dp(40), 0, dp(40));
         screen.addView(box, lp);
-        box.setBackground(new SceneGlassDrawable(box, 30f, 0x45131C2B));
-        box.setOutlineProvider(rounded(30));
+        SceneGlassDrawable.apply(box, 30f, GlassTone.Kind.PANEL);
         box.setClipToOutline(true);
         box.setElevation(dp(24));
         screenTitle = text(30, display, TEXT);
@@ -1544,20 +1543,26 @@ final class ScenicHome implements NowPlaying.Listener {
         box.addView(scroll, sl);
     }
 
-    private void openScreen(String title) {
+    /**
+     * Shows a secondary screen. {@code reopen} rebuilds it when Back returns to it; null marks a transient
+     * screen (a download in progress) that Back skips. See {@link ScreenStack} for refresh/unwind rules.
+     */
+    private void openScreen(String title, Runnable reopen) {
         screenToken++;
         boolean fromPanel = panel.getVisibility() == View.VISIBLE;
         if (fromPanel) {
+            panelFocusIndex = indexOfFocused(panelRows);
             panel.animate().cancel();
             panel.setVisibility(View.GONE);
         }
-        if (screen.getVisibility() != View.VISIBLE) {
-            // Back from a screen opened from the panel returns to Home's focus (the panel closes with it).
-            if (fromPanel && "panel".equals(focusMemory.top())) {
-                focusMemory.push("screen", focusMemory.pop());
-            } else {
-                focusMemory.push("screen", a.getCurrentFocus());
-            }
+        boolean wasOpen = screen.getVisibility() == View.VISIBLE && screens.depth() > 0;
+        if (wasOpen && !navigatingBack) saveScreenState(screens.top());
+        if (!wasOpen) {
+            screens.clear();
+            screenFromPanel = fromPanel;
+            // Opened from Settings, Back returns to Settings: its own focus record stays on top of the memory.
+            if (!fromPanel) focusMemory.push("screen", a.getCurrentFocus());
+            screen.animate().cancel();
             screen.setVisibility(View.VISIBLE);
             screen.setAlpha(0f);
             screen.setScaleX(0.985f);
@@ -1565,31 +1570,127 @@ final class ScenicHome implements NowPlaying.Listener {
             screen.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(reducedMotion ? 120 : PANEL_MS)
                     .setInterpolator(EASE).withLayer().start();
         }
+        ScreenStack.Move move = screens.enter(title, reopen);
+        ScreenStack.Entry<Runnable> top = screens.top();
+        boolean restoring = navigatingBack || move == ScreenStack.Move.REFRESH || move == ScreenStack.Move.POP_TO;
+        pendingRestore = restoring ? new int[]{top.scrollY, top.focusIndex} : null;
+        if (move == ScreenStack.Move.PUSH) slideContent(1);
+        else if (navigatingBack || move == ScreenStack.Move.POP_TO) slideContent(-1);
+        navigatingBack = false;
         screenTitle.setText(title);
         screenContent.removeAllViews();
         screenScroll.scrollTo(0, 0);
     }
 
+    /** One level deeper slides in from the right; back slides in from the left. Reduced motion: a fade. */
+    private void slideContent(int direction) {
+        for (View v : new View[]{screenTitle, screenScroll}) {
+            v.animate().cancel();
+            v.setAlpha(0.2f);
+            v.setTranslationX(reducedMotion ? 0f : dp(18) * direction);
+            v.animate().alpha(1f).translationX(0f).setDuration(reducedMotion ? 100 : 240).setInterpolator(EASE).start();
+        }
+    }
+
+    private void saveScreenState(ScreenStack.Entry<Runnable> e) {
+        if (e == null) return;
+        e.scrollY = screenScroll.getScrollY();
+        e.focusIndex = indexOfFocused(screenContent);
+    }
+
+    /** Index of the direct child of {@code g} that holds focus, or -1. */
+    private int indexOfFocused(ViewGroup g) {
+        View f = a.getCurrentFocus();
+        for (int i = 0; f != null && i < g.getChildCount(); i++) if (isInside(f, g.getChildAt(i))) return i;
+        return -1;
+    }
+
+    /** Back inside the screen layer: the previous level, then Settings (if it opened the screen), then Home. */
+    private void backScreen() {
+        hideKeyboard();
+        ScreenStack.Entry<Runnable> parent = screens.back();
+        if (parent == null) {
+            closeScreen();
+            return;
+        }
+        navigatingBack = true;
+        try {
+            parent.reopen.run();
+        } finally {
+            navigatingBack = false;
+        }
+    }
+
     private void closeScreen() {
         screenToken++; // Ignore any late gallery/network callbacks from the closed screen.
         hideKeyboard();
+        screens.clear();
+        pendingRestore = null;
         screen.animate().cancel();
         screen.animate().alpha(0f).setDuration(reducedMotion ? 100 : 220)
                 .withEndAction(() -> { screen.setVisibility(View.GONE); screenContent.removeAllViews(); }).start();
-        restoreFocus("screen");
+        if (screenFromPanel) returnToPanel();
+        else restoreFocus("screen");
     }
 
+    /** Leaves the screen layer at once, for an action that leaves Home or opens another layer. */
     private void closeScreenNow() {
         screenToken++;
         hideKeyboard();
+        screens.clear();
+        pendingRestore = null;
         screen.animate().cancel();
         screen.setVisibility(View.GONE);
         screenContent.removeAllViews();
-        restoreFocus("screen");
+        boolean fromPanel = screenFromPanel;
+        screenFromPanel = false;
+        restoreFocus(fromPanel ? "panel" : "screen");
     }
 
+    /** Settings comes back as it was left: same scroll, the row that opened the screen focused. */
+    private void returnToPanel() {
+        screenFromPanel = false;
+        fillPanel();   // statuses (weather, music access) may have changed; the rows and their order do not
+        panel.animate().cancel();
+        panel.setVisibility(View.VISIBLE);
+        panel.setAlpha(0f);
+        panel.setTranslationX(reducedMotion ? 0f : -dp(12));
+        panel.animate().alpha(1f).translationX(0f).setDuration(reducedMotion ? 100 : 240).setInterpolator(EASE)
+                .withLayer().start();
+        View row = panelFocusIndex >= 0 && panelFocusIndex < panelRows.getChildCount()
+                ? panelRows.getChildAt(panelFocusIndex) : null;
+        if (row == null || !row.isFocusable() || !row.requestFocus()) focusFirst(panelRows);
+    }
+
+    /** First row, or, when coming back to this screen, the row and scroll it was left at. */
     private void focusFirstRow() {
-        screenContent.post(() -> focusFirst(screenContent));
+        final int[] restore = pendingRestore;
+        pendingRestore = null;
+        screenContent.post(() -> {
+            if (restore == null || !restoreScreenFocus(restore[1])) {
+                focusFirst(screenContent);
+                return;
+            }
+            // After layout and before the first frame: the restored scroll never shows a jump.
+            screenScroll.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+                @Override public boolean onPreDraw() {
+                    screenScroll.getViewTreeObserver().removeOnPreDrawListener(this);
+                    screenScroll.scrollTo(0, restore[0]);
+                    return true;
+                }
+            });
+        });
+    }
+
+    private boolean restoreScreenFocus(int index) {
+        if (index < 0) return false;
+        for (int i = Math.min(index, screenContent.getChildCount() - 1); i >= 0; i--) {
+            View c = screenContent.getChildAt(i);
+            if (c.getVisibility() != View.VISIBLE) continue;
+            if (c.isFocusable() && c.requestFocus()) return true;
+            if (c instanceof ViewGroup && focusFirst((ViewGroup) c)) return true;
+        }
+        return false;
     }
 
     private static boolean focusFirst(ViewGroup g) {
@@ -1621,7 +1722,7 @@ final class ScenicHome implements NowPlaying.Listener {
 
     // Search: installed apps and My Space titles, typed with the TV keyboard.
     private void openSearch() {
-        openScreen(a.getString(R.string.scenic_search));
+        openScreen(a.getString(R.string.scenic_search), this::openSearch);
         EditText field = field("Apps and saved titles");
         field.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
         screenContent.addView(field, fieldLp());
@@ -1660,7 +1761,7 @@ final class ScenicHome implements NowPlaying.Listener {
 
     // Discover: only what this TV knows: saved titles and recently opened apps. No catalogue is invented.
     private void openDiscover() {
-        openScreen(a.getString(R.string.scenic_discover));
+        openScreen(a.getString(R.string.scenic_discover), this::openDiscover);
         List<MySpace.Title> titles = MySpace.load(a);
         List<AppAdapter.Entry> recent = new ArrayList<>();
         for (String p : Recents.load(a)) {
@@ -1688,7 +1789,7 @@ final class ScenicHome implements NowPlaying.Listener {
 
     // My Space: local titles in collections.
     private void openMySpace() {
-        openScreen(a.getString(R.string.scenic_my_space));
+        openScreen(a.getString(R.string.scenic_my_space), this::openMySpace);
         List<MySpace.Title> titles = MySpace.load(a);
         screenContent.addView(row("Add a title", null, this::openAddTitle));
         if (titles.isEmpty()) {
@@ -1705,7 +1806,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openAddTitle() {
-        openScreen("Add a title");
+        openScreen("Add a title", this::openAddTitle);
         EditText title = field("Title");
         EditText collection = field("Collection (" + MySpace.DEFAULT_COLLECTION + ")");
         EditText link = field("Link (optional)");
@@ -1782,7 +1883,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openWallpapers() {
-        openScreen(a.getString(R.string.scenic_wallpapers));
+        openScreen(a.getString(R.string.scenic_wallpapers), this::openWallpapers);
         SharedPreferences p = prefs();
         String choice = p.getString(WALLPAPER_KEY, "auto");
         boolean aerials = !AerialBackdrop.catalog(a).isEmpty();
@@ -1850,7 +1951,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openBrazilWallpapers() {
-        openScreen("Brazil · aerial landscapes");
+        openScreen("Brazil · aerial landscapes", this::openBrazilWallpapers);
         note("Select a city or state, then find 4K aerial photos on Wikimedia Commons. Downloads are optional "
                 + "and rotate as a group. The collection grows as you add photos; images are never downloaded "
                 + "automatically on mobile data or at startup.");
@@ -1864,7 +1965,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openBrazilVideos() {
-        openScreen("Brazil · drone videos");
+        openScreen("Brazil · drone videos", this::openBrazilVideos);
         List<String[]> installed = AerialBackdrop.catalog(a);
         int brazilCount = 0;
         for (String[] video : installed) if (video[0].startsWith("br_")) brazilCount++;
@@ -1896,7 +1997,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openBrazilVideoCredits() {
-        openScreen("Brazil videos · credits");
+        openScreen("Brazil videos · credits", this::openBrazilVideoCredits);
         File dir = a.getExternalFilesDir("aerials");
         File index = dir == null ? null : new File(dir, "aerials.json");
         int n = 0;
@@ -1920,7 +2021,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openBrazilVideoSources(String region) {
-        openScreen("Brazil · available drone clips");
+        openScreen("Brazil · available drone clips", () -> openBrazilVideoSources(region));
         note("Loading the Wikimedia Commons free-licensed video catalog…");
         int generation = screenToken;
         worker.execute(() -> {
@@ -1950,7 +2051,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void downloadBrazilVideo(BrazilAerials.Clip clip) {
-        openScreen("Downloading Brazil aerial");
+        openScreen("Downloading Brazil aerial", null);
         note(clip.title + "\n" + clip.credit + "\n" + clip.source);
         TextView progress = text(18, medium, TEXT);
         progress.setText("Downloading… (up to 180 MiB)");
@@ -1990,7 +2091,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openWallpaperGroup(ScenicWallpaperCatalog.Group group) {
-        openScreen(group.label);
+        openScreen(group.label, () -> openWallpaperGroup(group));
         List<ScenicWallpaperCatalog.Item> photos = ScenicWallpaperPlayer.items(a, group.id);
         screenContent.addView(row("Use collection · Shuffle", photos.isEmpty() ? "Download photos first" : photos.size() + " photos", () -> {
             if (photos.isEmpty()) {
@@ -2014,7 +2115,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openPhotoCredits(ScenicWallpaperCatalog.Group group) {
-        openScreen("Credits · " + group.label);
+        openScreen("Credits · " + group.label, () -> openPhotoCredits(group));
         int n = 0;
         for (ScenicWallpaperCatalog.Item photo : ScenicWallpaperPlayer.items(a, group.id)) {
             if (photo.file == null) continue;
@@ -2029,7 +2130,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openCommonsGroup(ScenicWallpaperCatalog.Group group) {
-        openScreen("4K · " + group.label);
+        openScreen("4K · " + group.label, () -> openCommonsGroup(group));
         note("Searching Wikimedia Commons for landscape photos at least 3840 × 2160. Files are optional downloads; "
                 + "authors and licences remain available in this gallery. This may take a few seconds.");
         int generation = screenToken;
@@ -2064,7 +2165,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void downloadCommonsPhoto(ScenicWallpaperCatalog.Group group, CommonsWallpapers.Photo photo) {
-        openScreen("Downloading 4K photo");
+        openScreen("Downloading 4K photo", null);
         note(photo.name + "\n" + photo.credit + "\n" + photo.source);
         note("Downloading and saving to this TV. Please wait…");
         int generation = screenToken;
@@ -2112,7 +2213,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openAppearance() {
-        openScreen(a.getString(R.string.scenic_appearance));
+        openScreen(a.getString(R.string.scenic_appearance), this::openAppearance);
         SharedPreferences choices = a.getSharedPreferences(Config.SETTINGS_NAME, Context.MODE_PRIVATE);
         boolean reduced = cfg.reducedMotion;
         screenContent.addView(row("Choose one of 17 themes", null, () -> {
@@ -2139,7 +2240,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openWeather() {
-        openScreen(a.getString(R.string.scenic_weather));
+        openScreen(a.getString(R.string.scenic_weather), this::openWeather);
         heading("Temperature units");
         screenContent.addView(choiceRow("Celsius (°C)", null, Weather.CELSIUS.equals(weather.unit()),
                 () -> chooseWeatherUnit(Weather.CELSIUS)));
@@ -2157,6 +2258,7 @@ final class ScenicHome implements NowPlaying.Listener {
             String q = city.getText().toString().trim();
             if (q.isEmpty()) return;
             hideKeyboard();
+            int generation = screenToken;
             weather.setPlace(q, name -> {
                 if (name == null) {
                     Toast.makeText(a, "Could not find “" + q + "” (or no internet)", Toast.LENGTH_LONG).show();
@@ -2164,14 +2266,15 @@ final class ScenicHome implements NowPlaying.Listener {
                 }
                 Toast.makeText(a, "Weather: " + name, Toast.LENGTH_SHORT).show();
                 refreshWeather();
-                closeScreenNow();
+                // Only if Weather is still the screen in front: the lookup may finish after the user moved on.
+                if (generation == screenToken && screen.getVisibility() == View.VISIBLE) backScreen();
             });
         }));
         if (weather.configured()) {
             screenContent.addView(row("Turn weather off", null, () -> {
                 weather.clear();
                 weatherView.setVisibility(View.GONE);
-                closeScreenNow();
+                backScreen();
             }));
         }
         // Open at the first unit choice; the city field remains reachable by Down.
@@ -2188,7 +2291,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openMusicAccess() {
-        openScreen(a.getString(R.string.scenic_music_access));
+        openScreen(a.getString(R.string.scenic_music_access), this::openMusicAccess);
         if (NowPlaying.hasAccess(a)) {
             note("Access is on. When an app such as Spotify or YouTube Music plays, its track, artwork and controls "
                     + "show above the Dock. Only the controls the app offers appear.");
@@ -2208,7 +2311,7 @@ final class ScenicHome implements NowPlaying.Listener {
     }
 
     private void openBackup() {
-        openScreen(a.getString(R.string.scenic_backup));
+        openScreen(a.getString(R.string.scenic_backup), this::openBackup);
         note("Dock favourites, My Space, weather place and Home choices are stored only on this TV (no account, no "
                 + "cloud), and are lost if the launcher's data is cleared.\n\nRecovery: the project's tools "
                 + "(tools/restore.sh, tools/recovery.py) re-enable the TV's own launcher over ADB if this Home ever "
@@ -2220,10 +2323,6 @@ final class ScenicHome implements NowPlaying.Listener {
 
     private SharedPreferences prefs() {
         return a.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-    }
-
-    private int glassTint() {
-        return "frosted".equals(prefs().getString(GLASS_KEY, "clear")) ? 0x40DDE6F5 : 0x1FE6EEFA;
     }
 
     private void addStill() {
@@ -2293,7 +2392,7 @@ final class ScenicHome implements NowPlaying.Listener {
         ImageView b = new ImageView(a);
         b.setImageResource(icon);
         b.setImageTintList(a.getColorStateList(R.color.scenic_icon_tint));
-        b.setBackground(new SceneGlassDrawable(b, -1f, 0x2AFFFFFF));
+        SceneGlassDrawable.apply(b, -1f, GlassTone.Kind.CONTROL);
         b.setScaleType(ImageView.ScaleType.CENTER);
         b.setFocusable(true);
         b.setClickable(true);
